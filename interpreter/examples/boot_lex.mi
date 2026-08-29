@@ -1,0 +1,61 @@
+// ── 自举模块 1：lexer（独立，只提供 lexMian）──
+// C 的 .c 单元：自身独立编译，通过函数名暴露接口。
+let keywords = {
+  "let": "LET", "print": "PRINT", "if": "IF", "then": "THEN", "else": "ELSE",
+  "done": "DONE", "return": "RETURN", "fun": "FUN", "true": "TRUE", "false": "FALSE",
+  "while": "WHILE", "for": "FOR", "import": "IMPORT"
+};
+let puncts = {
+  "(": "LPAREN", ")": "RPAREN", "{": "LBRACE", "}": "RBRACE", ";": "SEMI",
+  ",": "COMMA", "[": "LBRACKET", "]": "RBRACKET", ".": "DOT", ":": "COLON",
+  "+": "PLUS", "-": "MINUS", "*": "STAR", "/": "SLASH"
+};
+fun isDigit(c) { return c >= "0" && c <= "9"; }
+fun isAlpha(c) { return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"; }
+fun isAlnum(c) { return isDigit(c) || isAlpha(c); }
+fun sub(s, from, to) {
+  let out = ""; let i = from;
+  while (i < to) { out = out + s[i]; i = i + 1; }
+  return out;
+}
+fun append(arr, item) { return arr + [item]; }
+fun lexMian(src) {
+  let tokens = []; let i = 0; let line = 1; let n = len(src);
+  while (i < n) {
+    let c = src[i];
+    if (c == " " || c == "\t" || c == "\r") { i = i + 1; }
+    else if (c == "\n") { line = line + 1; i = i + 1; }
+    else if (c == "/" && i + 1 < n && src[i+1] == "/") { while (i < n && src[i] != "\n") { i = i + 1; } }
+    else {
+      let q = chr(34);
+      if (c == q) {
+        let start = i; i = i + 1; let unclosed = 1;
+        while (i < n && src[i] != q) { i = i + 1; }
+        if (i >= n) { tokens = append(tokens, { "type": "ERROR", "lexeme": "未闭合字符串", "line": line }); unclosed = 0; }
+        if (unclosed) { i = i + 1; let lit = sub(src, start, i); tokens = append(tokens, { "type": "STRING", "lexeme": lit, "line": line }); }
+      } else if (isDigit(c)) {
+        let start = i; while (i < n && isDigit(src[i])) { i = i + 1; }
+        tokens = append(tokens, { "type": "NUMBER", "lexeme": sub(src, start, i), "line": line });
+      } else if (isAlpha(c)) {
+        let start = i; while (i < n && isAlnum(src[i])) { i = i + 1; }
+        let word = sub(src, start, i); let k = get(keywords, word, "");
+        let type = "IDENT";
+        if (k != "") { type = k; }
+        tokens = append(tokens, { "type": type, "lexeme": word, "line": line });
+      } else if (c == "=" && i + 1 < n && src[i+1] == "=") {
+        if (i + 2 < n && src[i+2] == "=") { tokens = append(tokens, { "type": "EQ_EQ_EQ", "lexeme": "===", "line": line }); i = i + 3; }
+        else { tokens = append(tokens, { "type": "EQ_EQ", "lexeme": "==", "line": line }); i = i + 2; }
+      } else if (c == "!" && i + 1 < n && src[i+1] == "=") {
+        if (i + 2 < n && src[i+2] == "=") { tokens = append(tokens, { "type": "BANG_EQ_EQ", "lexeme": "!==", "line": line }); i = i + 3; }
+        else { tokens = append(tokens, { "type": "BANG_EQ", "lexeme": "!=", "line": line }); i = i + 2; }
+      } else {
+        let p = get(puncts, c, "");
+        if (p) { tokens = append(tokens, { "type": p, "lexeme": c, "line": line }); i = i + 1; }
+        else if (c == "=") { tokens = append(tokens, { "type": "EQ", "lexeme": "=", "line": line }); i = i + 1; }
+        else if (c == "!") { tokens = append(tokens, { "type": "BANG", "lexeme": "!", "line": line }); i = i + 1; }
+        else { i = i + 1; }
+      }
+    }
+  }
+  return tokens;
+}
