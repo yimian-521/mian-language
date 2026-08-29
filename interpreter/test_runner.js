@@ -452,6 +452,37 @@ SUITES.push({
   ],
 });
 
+SUITES.push({ name: "ref", cases: [
+    t("ref 创建引用并 read", async () => {
+      const r = await run("let x = 5; let r = ref x; print read(r);");
+      assertEq(r.out.join("|"), "5");
+    }),
+    t("write 通过引用改目标", async () => {
+      const r = await run("let x = 5; let r = ref x; write(r, 99); print read(r);");
+      assertEq(r.out.join("|"), "99");
+    }),
+    t("write 改的是真实变量", async () => {
+      const r = await run("let x = 5; let r = ref x; write(r, 7); print x;");
+      assertEq(r.out.join("|"), "7");
+    }),
+    t("引用指向的名字仍读最新值", async () => {
+      const r = await run("let a = 1; let r = ref a; let a = 2; print read(r);");
+      assertEq(r.out.join("|"), "2");
+    }),
+    t("ref 数组元素", async () => {
+      const r = await run("let a = [10, 20, 30]; let r = ref a[1]; write(r, 99); print a[1];");
+      assertEq(r.out.join("|"), "99");
+    }),
+    t("ref 字典值", async () => {
+      const r = await run('let d = {"age": 3}; let r = ref d["age"]; write(r, 4); print d["age"];');
+      assertEq(r.out.join("|"), "4");
+    }),
+    t("ref 嵌套数组元素", async () => {
+      const r = await run("let m = [[1,2],[3,4]]; let r = ref m[1][0]; write(r, 88); print m[1][0];");
+      assertEq(r.out.join("|"), "88");
+    }),
+  ] });
+
 function stressSuites(scale) {
   return [
     {
