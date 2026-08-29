@@ -481,6 +481,18 @@ SUITES.push({ name: "ref", cases: [
       const r = await run("let m = [[1,2],[3,4]]; let r = ref m[1][0]; write(r, 88); print m[1][0];");
       assertEq(r.out.join("|"), "88");
     }),
+    t("map 每个元素过函数", async () => {
+      const r = await run("fun d(x) { return x * 2; } let b = map([1,2,3], d); print b[0]; print b[1]; print b[2];");
+      assertEq(r.out.join("|"), "2|4|6");
+    }),
+    t("filter 保留为真元素", async () => {
+      const r = await run("fun big(x) { return x > 2; } let b = filter([1,2,3,4], big); print len(b); print b[0];");
+      assertEq(r.out.join("|"), "2|3");
+    }),
+    t("fold 归约求和", async () => {
+      const r = await run("fun add(a,x) { return a + x; } let s = fold([1,2,3,4], add, 0); print s;");
+      assertEq(r.out.join("|"), "10");
+    }),
   ] });
 
 function stressSuites(scale) {
