@@ -54,6 +54,8 @@ class BytecodeVM {
         case OP.NOT: this.stack.push(!this.pop()); break;
         case OP.EQ: { const b = this.pop(), a = this.pop(); this.stack.push(a === b); break; }
         case OP.NEQ: { const b = this.pop(), a = this.pop(); this.stack.push(a !== b); break; }
+        case OP.EQEQEQ: { const b = this.pop(), a = this.pop(); this.stack.push(typeof a === typeof b && a === b); break; }
+        case OP.NEQEQ: { const b = this.pop(), a = this.pop(); this.stack.push(typeof a !== typeof b || a !== b); break; }
         case OP.LT: { const b = this.pop(), a = this.pop(); this.stack.push(a < b); break; }
         case OP.LTE: { const b = this.pop(), a = this.pop(); this.stack.push(a <= b); break; }
         case OP.GT: { const b = this.pop(), a = this.pop(); this.stack.push(a > b); break; }
@@ -64,8 +66,35 @@ class BytecodeVM {
           this.stack.push(items);
           break;
         }
+        case OP.DICT: {
+          // 键值对在栈上：key1,val1,key2,val2...（键先压）
+          const obj = {};
+          const pairs = [];
+          for (let i = 0; i < operand * 2; i++) pairs.unshift(this.pop());
+          for (let i = 0; i < pairs.length; i += 2) {
+            obj[pairs[i]] = pairs[i + 1];
+          }
+          this.stack.push(obj);
+          break;
+        }
         case OP.IDX: {
           const idx = this.pop(), arr = this.pop();
+          // 字典索引：d["key"]
+          if (arr && typeof arr === "object" && !Array.isArray(arr)) {
+            if (typeof idx !== "string") this.throwMian("字典索引要是字符串");
+            if (!(idx in arr)) this.throwMian(`字典没有键 '${idx}'`);
+            this.stack.push(arr[idx]);
+            break;
+          }
+          // 字符串索引：s[i] 或 s["len"]（getattr 脱糖）
+          if (typeof arr === "string") {
+            if (idx === "len") { this.stack.push(arr.length); break; }
+            if (typeof idx !== "number") this.throwMian("字符串索引要是数字");
+            const i = Math.trunc(idx);
+            if (i < 0 || i >= arr.length) this.throwMian(`字符串索引越界：长度 ${arr.length}，索引 ${i}`);
+            this.stack.push(arr[i]);
+            break;
+          }
           if (!Array.isArray(arr)) this.throwMian("只能对数组用索引");
           if (typeof idx !== "number") this.throwMian("索引要是数字");
           const i = Math.trunc(idx);
@@ -106,9 +135,10 @@ class BytecodeVM {
           if (this.depth >= this.depthLimit) this.throwMian(`递归太深（>${this.depthLimit} 层）`);
           const locals = new Map();
           callee.params.forEach((p, i) => locals.set(p, args[i]));
-          this.frames.push({ retIp: this.ip, retCode: this.code, locals });
+          this.frames.push({ retIp: this.ip, retCode: this.code, retConstants: this.constants, locals });
           this.depth++;
           this.code = callee.body;
+          this.constants = callee.constants || [];
           this.ip = 0;
           break;
         }
@@ -118,6 +148,7 @@ class BytecodeVM {
           if (!frame) { last = retVal; return { result: last, out: this.out, globals: this.globals }; }
           this.depth--;
           this.code = frame.retCode;
+          this.constants = frame.retConstants;
           this.ip = frame.retIp;
           this.stack.push(retVal);   // 返回值留给调用方
           break;
