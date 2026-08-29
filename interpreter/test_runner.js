@@ -21,6 +21,8 @@ async function run(source, options = {}) {
     // 边界可配置：默认 100 万次护栏，测试时可调低
     loopLimit: options.loopLimit || testConfig.loopLimit,
     depthLimit: options.depthLimit || testConfig.depthLimit,
+    // 机器手（并发/网络/文件）：测试并发能力时注入
+    machineHands: options.machineHands || null,
   };
   const { tokens, errors: lexErrors } = new Lexer(source).scanTokens();
   const { statements, errors: parseErrors } = new Parser(tokens).parseProgram();
