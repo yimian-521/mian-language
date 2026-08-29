@@ -48,6 +48,7 @@ if (arg1 === "test") {
     ["双身体对拍", "cross_mode_test.js", []],
     ["三身体对拍（C++ 原生）", "test_cpp_native.js", []],
     ["三件套（文件/进程/网络）", "test_stdlib.js", []],
+    ["并发能力（spawn/sleep）", "test_concurrency.js", []],
     ["边界护栏", "test_boundaries.js", []],
     ["跨文件 import", "test_import.js", []],
   ];
