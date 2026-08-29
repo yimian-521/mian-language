@@ -3,7 +3,7 @@
 > Python 级写感 + C 级性能，一门"免于二选一"的原创编程语言。
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.0-brightgreen)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.2.0-brightgreen)](CHANGELOG.md)
 
 **不模仿、不套壳**——手写 lexer/parser/求值器/字节码 VM/C++ 原生执行器，原创概念（值强度 / 五段账本 / done 定性态）真正定义成语法，目标是让语言自己写自己（自举）。
 
