@@ -109,6 +109,19 @@ class BytecodeVM {
           this.stack.push(this.globals.get(operand));
           break;
         }
+        case OP.REF: {
+          // ref x → 压入指向变量槽位的引用（globals 或当前帧 locals）
+          const frame = this.frames[this.frames.length - 1];
+          let target;
+          if (frame && frame.locals.has(operand)) {
+            target = { map: frame.locals, name: operand };
+          } else {
+            if (!this.globals.has(operand)) this.throwMian(`变量 '${operand}' 未声明`);
+            target = { map: this.globals, name: operand };
+          }
+          this.stack.push({ kind: "ref", target });
+          break;
+        }
         case OP.STORE: {
           const frame = this.frames[this.frames.length - 1];
           const v = this.pop();
