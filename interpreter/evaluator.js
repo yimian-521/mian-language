@@ -48,6 +48,45 @@ class MianFunction {
   toString() { return `<fun ${this.name}>`; }
 }
 
+// 引用（指针索引的第二块砖）：ref 指向"槽位"，可以是变量槽（env+name）或容器元素（container+key）。
+// 指向名字/键而非 C 裸地址，比 C 安全；悬垂检测=目标槽位还在。
+class Ref {
+  // kind: "var" → 变量槽（env + name）；"elem" → 容器元素（container 的 MianValue + key）
+  constructor(kind, env, name, container, key) {
+    this.kind = kind;
+    this.env = env;          // 变量槽所在环境
+    this.name = name;        // 变量名（kind=var 用）
+    this.container = container; // 容器 MianValue（kind=elem 用，持有数组/字典）
+    this.key = key;          // 数组索引 或 字典键（kind=elem 用）
+  }
+  // 活着 = 目标槽位还在。变量槽=名字在 env；容器元素=容器还在且键/索引有效。
+  alive() {
+    if (this.kind === "var") return this.env.has(this.name);
+    const v = this.container && this.container.value;
+    if (Array.isArray(v)) return typeof this.key === "number" && this.key >= 0 && this.key < v.length;
+    if (v && typeof v === "object") return this.key in v;
+    return false;
+  }
+  get() {
+    if (this.kind === "var") return this.env.get(this.name).value;
+    const v = this.container.value;
+    return Array.isArray(v) ? v[this.key] : v[this.key];
+  }
+  set(val) {
+    if (this.kind === "var") {
+      this.env.set(this.name, new MianValue(val, STRENGTH.MEDIUM, `write ${this.name}`));
+    } else {
+      this.container.value[this.key] = val;
+    }
+  }
+  label() {
+    if (this.kind === "var") return this.name;
+    if (Array.isArray(this.container.value)) return `[${this.key}]`;
+    return `["${this.key}"]`;
+  }
+  toString() { return `<ref ${this.kind === "var" ? this.name : this.label()}>`; }
+}
+
 // 宿主并发调用免语言函数（spawn 机器手用）：
 // 用 parentEvaluator 的配置 + fn 的闭包快照，新建子求值器跑函数体
 // 返回 [成功?, 值|原因]——不抛不吞，与问-答契约一致
@@ -143,6 +182,21 @@ class Evaluator {
         if (!d || typeof d !== "object" || Array.isArray(d)) throw new MianError(errFmt(ME.E905.msg, {}), 0, 0, ME.E905.kind, ME.E905.level || "error", "E905");
         return (key in d) ? d[key] : (def === undefined ? null : def);
       }, STRENGTH.STRONG, "stdlib get"));
+      // read(r)：读引用指向的目标值。悬垂（目标被销毁）→ 明确报错，不静默。
+      this.env.set("read", new MianValue((r) => {
+        const ref = (r instanceof MianValue) ? r.value : r;
+        if (!(ref instanceof Ref)) throw new MianError("read 的参数必须是 ref 创建的引用", 0, 0, "code", "error", "E915");
+        if (!ref.alive()) throw new MianError(`引用指向的目标 ${ref.label()} 已被销毁（悬垂引用）`, 0, 0, "logic", "error", "E916");
+        return ref.get();
+      }, STRENGTH.STRONG, "stdlib read"));
+      // write(r, v)：把引用指向的目标改成 v。目标还活着就写，悬垂就报错。
+      this.env.set("write", new MianValue((r, v) => {
+        const ref = (r instanceof MianValue) ? r.value : r;
+        if (!(ref instanceof Ref)) throw new MianError("write 的第一个参数必须是 ref 创建的引用", 0, 0, "code", "error", "E917");
+        if (!ref.alive()) throw new MianError(`引用指向的目标 ${ref.label()} 已被销毁（悬垂引用）`, 0, 0, "logic", "error", "E916");
+        ref.set(v);
+        return v;
+      }, STRENGTH.STRONG, "stdlib write"));
     }
     // 机器三件套（文件/网络/进程）：注入与 stdlib 开关无关——有手就装手
     if (this.machineHands && !options.env) {
@@ -367,6 +421,53 @@ class Evaluator {
         return slot;   // 变量携带它自己出生时的强度
       }
       case "grouping": return this.evaluate(node.expr);
+      case "ref": {
+        // ref x：创建指向变量槽位的引用。记入账本（出生）。
+        const slot = this.env.get(node.name);
+        if (slot === undefined) throw new MianError(errFmt(ME.E081.msg, { name: node.name }), node.line, node.col, ME.E081.kind, ME.E081.level || "error", "E081");
+        const ref = new Ref("var", this.env, node.name, null, null);
+        this.ledger.birth(ref, `ref ${node.name}`);
+        return new MianValue(ref, STRENGTH.STRONG, `ref ${node.name}`);
+      }
+      case "refElem": {
+        // ref a[0] / ref d["k"] / ref a[0][1]：沿索引链走到目标容器元素，创建指向它的引用。
+        // write 时改真实容器元素（MianValue.value 引用共享，改到真数据）。
+        const root = this.env.get(node.name);
+        if (root === undefined) throw new MianError(errFmt(ME.E081.msg, { name: node.name }), node.line, node.col, ME.E081.kind, ME.E081.level || "error", "E081");
+        // 求每条索引的值
+        const path = [];
+        for (const idxNode of node.indices) {
+          const idxMv = await this.evaluate(idxNode);
+          path.push(idxMv.value);
+        }
+        // 目标容器 = 走完前 n-1 层后的容器（它持有最后一个键）。
+        // 例如 ref a[0][1]：目标容器 = a[0]（一个数组），目标键 = 1。
+        let target = root;
+        for (let i = 0; i < path.length - 1; i++) {
+          const v = target.value;
+          if (!Array.isArray(v) && !(v && typeof v === "object")) {
+            throw new MianError(errFmt(ME.E901.msg, {}), node.line, node.col, ME.E901.kind, ME.E901.level || "error", "E901");
+          }
+          const key = path[i];
+          if (Array.isArray(v)) {
+            if (typeof key !== "number") throw new MianError(errFmt(ME.E204.msg, {}), node.line, node.col, ME.E204.kind, ME.E204.level || "error", "E204");
+            if (key < 0 || key >= v.length) throw new MianError(errFmt(ME.E701.msg, { len: v.length, idx: key }), node.line, node.col, ME.E701.kind, ME.E701.level || "error", "E701");
+          } else {
+            if (typeof key !== "string") throw new MianError(errFmt(ME.E205.msg, {}), node.line, node.col, ME.E205.kind, ME.E205.level || "error", "E205");
+            if (!(key in v)) throw new MianError(errFmt(ME.E206.msg, { key }), node.line, node.col, ME.E206.kind, ME.E206.level || "error", "E206");
+          }
+          target = new MianValue(v[key], STRENGTH.MEDIUM, `refElem ${i}`);
+        }
+        const lastKey = path[path.length - 1];
+        // 校验最后一层容器可写（是数组或字典）
+        const lv = target.value;
+        if (!Array.isArray(lv) && !(lv && typeof lv === "object")) {
+          throw new MianError(errFmt(ME.E901.msg, {}), node.line, node.col, ME.E901.kind, ME.E901.level || "error", "E901");
+        }
+        const refElem = new Ref("elem", null, null, target, lastKey);
+        this.ledger.birth(refElem, `ref ${node.name}${path.map(k => "[" + k + "]").join("")}`);
+        return new MianValue(refElem, STRENGTH.STRONG, `refElem ${node.name}`);
+      }
       case "unary": {
         const right = await this.evaluate(node.right);
         const op = node.operator.lexeme;
