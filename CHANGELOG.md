@@ -3,6 +3,24 @@
 > 语义化版本（SemVer）：主版本.次版本.修订号
 > 不兼容变更 → 主版本；新增功能 → 次版本；bug修复 → 修订号
 
+## v0.2.0（2026-08-29）
+
+⚡ 并发能力（spawn/sleep）+ 测试护航。
+
+### 新增能力
+- `spawn(函数数组, 参数数组)`：并发跑多个免语言函数，全部完成一起回禀（机器手）
+- `sleep(毫秒)`：异步等待基础
+- `callMianFunction`：宿主能并发调 mfun（闭包隔离，问-答契约）
+- 机器手现 7 个：readFile/writeFile/fileExists/run/httpGet/spawn/sleep
+
+### 并发搜索示例
+- `examples/concurrent_search.mi`：三个引擎并发跑，504ms 完成（最慢 500ms），结果聚合
+- 证明免语言能写"多引擎同时搜"这类复杂工具
+
+### 测试护航
+- 新增 `test_concurrency.js`：6 用例（真并发/结果/结构/闭包隔离/非函数报错/sleep）
+- `mian test` 现在 9 组全绿
+
 ## v0.1.1（2026-08-29）
 
 🔧 三身体同时对拍落地 + VM/C++ 对齐修复。
