@@ -157,6 +157,7 @@ class Evaluator {
     // 边界配置化：测试可调低，生产默认 100 万/500
     this.loopLimit = options.loopLimit || 1000000;
     this.depthLimit = options.depthLimit || 500;
+    const self = this;  // 用于 stdlib 里调 callMianFunction（map/filter/fold 需要）
     // 标准库最小集（X2 已定）：clock / len / type / str
     if (options.stdlib !== false && !options.env) {
       this.env.set("clock", new MianValue(() => Date.now(), STRENGTH.STRONG, "stdlib clock"));
@@ -197,6 +198,40 @@ class Evaluator {
         ref.set(v);
         return v;
       }, STRENGTH.STRONG, "stdlib write"));
+      // ═══ 集合操作（Python 写感精华，纯函数不原地改；函数作参数契合支柱二）═══
+      // map(arr, fn)：每个元素过 fn，返回新数组
+      this.env.set("map", new MianValue(async (arr, fn) => {
+        if (!Array.isArray(arr)) throw new MianError("map 第一个参数要是数组", 0, 0, "code", "error", "E918");
+        if (!(fn instanceof MianFunction)) throw new MianError("map 第二个参数要是函数", 0, 0, "code", "error", "E919");
+        const out = [];
+        for (const item of arr) {
+          const r = await callMianFunction(fn, [item], self);
+          out.push(r[0] ? r[1] : null);
+        }
+        return out;
+      }, STRENGTH.STRONG, "stdlib map"));
+      // filter(arr, fn)：保留 fn 为真的元素，返回新数组
+      this.env.set("filter", new MianValue(async (arr, fn) => {
+        if (!Array.isArray(arr)) throw new MianError("filter 第一个参数要是数组", 0, 0, "code", "error", "E918");
+        if (!(fn instanceof MianFunction)) throw new MianError("filter 第二个参数要是函数", 0, 0, "code", "error", "E919");
+        const out = [];
+        for (const item of arr) {
+          const r = await callMianFunction(fn, [item], self);
+          if (r[0] && r[1]) out.push(item);
+        }
+        return out;
+      }, STRENGTH.STRONG, "stdlib filter"));
+      // fold(arr, fn, init)：归约，fn(acc, item) 逐项累积
+      this.env.set("fold", new MianValue(async (arr, fn, init) => {
+        if (!Array.isArray(arr)) throw new MianError("fold 第一个参数要是数组", 0, 0, "code", "error", "E918");
+        if (!(fn instanceof MianFunction)) throw new MianError("fold 第二个参数要是函数", 0, 0, "code", "error", "E919");
+        let acc = init;
+        for (const item of arr) {
+          const r = await callMianFunction(fn, [acc, item], self);
+          acc = r[0] ? r[1] : acc;
+        }
+        return acc;
+      }, STRENGTH.STRONG, "stdlib fold"));
     }
     // 机器三件套（文件/网络/进程）：注入与 stdlib 开关无关——有手就装手
     if (this.machineHands && !options.env) {
