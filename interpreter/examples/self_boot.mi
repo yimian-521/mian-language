@@ -1,0 +1,24 @@
+// ── 自举主程序：一次执行三次（import 三块独立模块，C/Go 式组装）──
+// 三段各自独立（lexer 产 token / parser 产 AST / eval 产值），
+// 通过函数名互相知道、依次调用——不合并成一个大函数。
+import "boot_lex.mi";
+import "boot_parse.mi";
+import "boot_eval.mi";
+
+// 主流程：源码 → lexMian → parseExpr → evalMian → 值
+let source = "1 + 2 * 3";
+let toks = lexMian(source);
+let parseResult = parseExpr(toks, 0, 1);
+let ast = parseResult["ast"];
+let val = evalMian(ast, {});
+print "源码: " + source;
+print "token 数: " + str(len(toks));
+print "AST: " + ast["kind"] + "(" + ast["op"] + ")";
+print "结果: " + str(val);
+
+// 再测一个：带括号 + 变量环境
+let source2 = "2 + 3 * 4";
+let toks2 = lexMian(source2);
+let pr2 = parseExpr(toks2, 0, 1);
+print "源码2: " + source2;
+print "结果2: " + str(evalMian(pr2["ast"], {}));
