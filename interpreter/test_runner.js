@@ -493,6 +493,14 @@ SUITES.push({ name: "ref", cases: [
       const r = await run("fun add(a,x) { return a + x; } let s = fold([1,2,3,4], add, 0); print s;");
       assertEq(r.out.join("|"), "10");
     }),
+    t("write 创建字典新键", async () => {
+      const r = await run('let d = {"a": 1}; let r = ref d["b"]; write(r, 2); print d["a"]; print d["b"];');
+      assertEq(r.out.join("|"), "1|2");
+    }),
+    t("read 不存在键报悬垂", async () => {
+      const r = await run('let d = {"a": 1}; let r = ref d["b"]; print read(r);');
+      assertEq(!!r.runtimeError, true, "read 不存在的键必须报悬垂，不静默");
+    }),
   ] });
 
 function stressSuites(scale) {
