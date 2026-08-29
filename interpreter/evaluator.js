@@ -173,6 +173,13 @@ class Evaluator {
         return typeof v;
       }, STRENGTH.STRONG, "stdlib type"));
       this.env.set("str", new MianValue((v) => String(v), STRENGTH.STRONG, "stdlib str"));
+      // num(s)：字符串 → 数字（str 的逆，自举 parser 需要：lexer 把数字存字符串）
+      this.env.set("num", new MianValue((v) => {
+        if (typeof v !== "string") throw new MianError("num 需要字符串", 0, 0, "code", "error", "E921");
+        const n = Number(v);
+        if (Number.isNaN(n)) throw new MianError(`num 不能转成数字: '${v}'`, 0, 0, "code", "error", "E922");
+        return n;
+      }, STRENGTH.STRONG, "stdlib num"));
       // chr：数字→字符（自举需要：字符串里表示引号等特殊字符）
       this.env.set("chr", new MianValue((v) => {
         if (typeof v !== "number") throw new MianError(errFmt(ME.E904.msg, {}), 0, 0, ME.E904.kind, ME.E904.level || "error", "E904");
@@ -190,10 +197,26 @@ class Evaluator {
         if (!ref.alive()) throw new MianError(`引用指向的目标 ${ref.label()} 已被销毁（悬垂引用）`, 0, 0, "logic", "error", "E916");
         return ref.get();
       }, STRENGTH.STRONG, "stdlib read"));
-      // write(r, v)：把引用指向的目标改成 v。目标还活着就写，悬垂就报错。
+      // write(r, v)：把引用指向的目标改成 v。目标还活着就写；目标是"可创建槽位"（最后键不存在）则创建。
+      // 逆向八步法：创建是显式操作，必须记账（第7步不静默），不默默吞。
       this.env.set("write", new MianValue((r, v) => {
         const ref = (r instanceof MianValue) ? r.value : r;
         if (!(ref instanceof Ref)) throw new MianError("write 的第一个参数必须是 ref 创建的引用", 0, 0, "code", "error", "E917");
+        if (ref.kind === "elem" && ref.container) {
+          const c = ref.container.value;
+          const exists = Array.isArray(c) ? (typeof ref.key === "number" && ref.key >= 0 && ref.key < c.length) : (ref.key in c);
+          if (!exists) {
+            // 可创建槽位：显式创建 + 记账（不静默）
+            if (Array.isArray(c) && typeof ref.key === "number" && ref.key === c.length) {
+              c.push(v);   // 数组末尾追加
+            } else if (!Array.isArray(c) && typeof ref.key === "string") {
+              c[ref.key] = v;   // 字典加新键
+            } else {
+              throw new MianError(`引用指向的目标 ${ref.label()} 无法创建（越界或非法键）`, 0, 0, "logic", "error", "E920");
+            }
+            return v;
+          }
+        }
         if (!ref.alive()) throw new MianError(`引用指向的目标 ${ref.label()} 已被销毁（悬垂引用）`, 0, 0, "logic", "error", "E916");
         ref.set(v);
         return v;
@@ -466,7 +489,7 @@ class Evaluator {
       }
       case "refElem": {
         // ref a[0] / ref d["k"] / ref a[0][1]：沿索引链走到目标容器元素，创建指向它的引用。
-        // write 时改真实容器元素（MianValue.value 引用共享，改到真数据）。
+        // 中间层必须存在（要穿过它才能到达目标）；最后一层可创建（write 建 / read 悬垂，由操作决定）。
         const root = this.env.get(node.name);
         if (root === undefined) throw new MianError(errFmt(ME.E081.msg, { name: node.name }), node.line, node.col, ME.E081.kind, ME.E081.level || "error", "E081");
         // 求每条索引的值
@@ -486,15 +509,17 @@ class Evaluator {
           const key = path[i];
           if (Array.isArray(v)) {
             if (typeof key !== "number") throw new MianError(errFmt(ME.E204.msg, {}), node.line, node.col, ME.E204.kind, ME.E204.level || "error", "E204");
+            // 中间层数组索引越界 → 结构错误（不能穿过不存在的元素）
             if (key < 0 || key >= v.length) throw new MianError(errFmt(ME.E701.msg, { len: v.length, idx: key }), node.line, node.col, ME.E701.kind, ME.E701.level || "error", "E701");
           } else {
             if (typeof key !== "string") throw new MianError(errFmt(ME.E205.msg, {}), node.line, node.col, ME.E205.kind, ME.E205.level || "error", "E205");
+            // 中间层字典键必须存在（前提检查：要穿过它到达目标）
             if (!(key in v)) throw new MianError(errFmt(ME.E206.msg, { key }), node.line, node.col, ME.E206.kind, ME.E206.level || "error", "E206");
           }
           target = new MianValue(v[key], STRENGTH.MEDIUM, `refElem ${i}`);
         }
         const lastKey = path[path.length - 1];
-        // 校验最后一层容器可写（是数组或字典）
+        // 校验最后一层容器可写（是数组或字典）——不校验键存在（最后一层可创建）
         const lv = target.value;
         if (!Array.isArray(lv) && !(lv && typeof lv === "object")) {
           throw new MianError(errFmt(ME.E901.msg, {}), node.line, node.col, ME.E901.kind, ME.E901.level || "error", "E901");
