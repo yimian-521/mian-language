@@ -48,6 +48,36 @@ class MianFunction {
   toString() { return `<fun ${this.name}>`; }
 }
 
+// 宿主并发调用免语言函数（spawn 机器手用）：
+// 用 parentEvaluator 的配置 + fn 的闭包快照，新建子求值器跑函数体
+// 返回 [成功?, 值|原因]——不抛不吞，与问-答契约一致
+async function callMianFunction(fn, args, parentEvaluator) {
+  try {
+    if (!(fn instanceof MianFunction)) return [false, "不是免语言函数"];
+    if (args.length !== fn.arity) return [false, `函数 ${fn.name} 需要 ${fn.arity} 个参数，传了 ${args.length} 个`];
+    const childEnv = new Map(fn.closureEnv || (parentEvaluator ? parentEvaluator.env : new Map()));
+    for (let i = 0; i < fn.params.length; i++) {
+      // 参数剥成裸值再包（args 可能直接是 MianValue 或裸值）
+      const raw = (args[i] instanceof MianValue) ? args[i].value : args[i];
+      childEnv.set(fn.params[i], new MianValue(raw, STRENGTH.MEDIUM, `param ${fn.params[i]}`));
+    }
+    const child = new Evaluator({
+      ledger: parentEvaluator ? parentEvaluator.ledgerEnabled : true,
+      ledgerInstance: parentEvaluator ? parentEvaluator.ledger : null,
+      env: childEnv,
+      out: [],
+      builtins: parentEvaluator ? parentEvaluator.builtins : null,
+      stdlib: false,
+      loopLimit: parentEvaluator ? parentEvaluator.loopLimit : 1000000,
+      depthLimit: parentEvaluator ? parentEvaluator.depthLimit : 500,
+    });
+    const r = await child.interpret(fn.body);
+    return [true, r];
+  } catch (e) {
+    return [false, (e && e.message || String(e)).slice(0, 120)];
+  }
+}
+
 // 五段账本
 class Ledger {
   constructor(enabled = true) {
@@ -119,6 +149,21 @@ class Evaluator {
       for (const [name, fn] of Object.entries(this.machineHands)) {
         this.env.set(name, new MianValue(fn, STRENGTH.STRONG, `host:${name}`));
       }
+      // 覆写 spawn 为免语言感知版（能并发调 mfun）
+      const self = this;
+      this.env.set("spawn", new MianValue(async (fns, argLists) => {
+        try {
+          if (!Array.isArray(fns)) return [false, "spawn 第一个参数要是函数数组"];
+          const tasks = fns.map((fn, i) => {
+            const args = (argLists && argLists[i]) || [];
+            if (typeof fn === "function") return Promise.resolve().then(() => fn(...args));
+            if (fn instanceof MianFunction) return callMianFunction(fn, args, self);
+            return Promise.resolve([false, "spawn 里的元素不是可调用的函数"]);
+          });
+          const results = await Promise.all(tasks);
+          return [true, results];
+        } catch (e) { return [false, "spawn-error:" + (e && e.message || String(e)).slice(0, 120)]; }
+      }, STRENGTH.STRONG, "host:spawn"));
     }
   }
 
@@ -562,4 +607,4 @@ function freezeEnv(env) {
   return snap;
 }
 
-module.exports = { Evaluator, MianError, MianReturnSignal, MianFunction, MianValue, Ledger, STRENGTH, isTruthy, summarize };
+module.exports = { Evaluator, MianError, MianReturnSignal, MianFunction, MianValue, Ledger, STRENGTH, isTruthy, summarize, callMianFunction };
