@@ -1,0 +1,3 @@
+// math_utils.mi —— 供 import 测试用的模块文件
+fun double(x) { return x * 2; }
+let greeting = "你好，欢迎导入。";
