@@ -8,10 +8,12 @@ const OP = {
   ADD: "ADD", SUB: "SUB", MUL: "MUL", DIV: "DIV",
   NEG: "NEG", NOT: "NOT",
   EQ: "EQ", NEQ: "NEQ", LT: "LT", LTE: "LTE", GT: "GT", GTE: "GTE",
+  EQEQEQ: "EQEQEQ", NEQEQ: "NEQEQ",
   LOAD: "LOAD", STORE: "STORE", PRINT: "PRINT",
   DUP: "DUP", POP: "POP",
   LAND: "LAND", LOR: "LOR",
   ARRAY: "ARRAY", IDX: "IDX",
+  DICT: "DICT",
   CALL: "CALL",
   JMP: "JMP", JMPF: "JMPF", RET: "RET",
 };
@@ -37,6 +39,18 @@ class Compiler {
         this.emit(OP.STORE, node.name.lexeme);
         break;
       }
+      case "letDestructure": {
+        // let (x, y) = f(); → 算右侧(数组)，逐个取元素存变量
+        this.expr(node.initializer);
+        for (let i = 0; i < node.names.length; i++) {
+          this.emit(OP.DUP);
+          this.emitConst(i);          // push 索引 i
+          this.emit(OP.IDX);          // 数组[i] → 取第 i 个元素
+          this.emit(OP.STORE, node.names[i]);
+        }
+        this.emit(OP.POP);   // 丢掉数组本身
+        break;
+      }
       case "assign": {
         this.expr(node.value);
         this.emit(OP.STORE, node.name.kind === "variable" ? node.name.name : node.name.lexeme);
@@ -57,7 +71,8 @@ class Compiler {
         this.emit(OP.RET);
         break;
       case "fun": {
-        const fn = { kind: "mfun", name: node.name, params: node.params, body: new Compiler().compile(node.body).code };
+        const sub = new Compiler().compile(node.body);
+        const fn = { kind: "mfun", name: node.name, params: node.params, body: sub.code, constants: sub.constants };
         this.emitConst(fn);
         this.emit(OP.STORE, node.name);
         break;
@@ -69,6 +84,21 @@ class Compiler {
         this.code[jmpf][1] = this.code.length;
         break;
       }
+      case "if": {
+        // if 条件 { then } else { else }——或许态
+        this.expr(node.condition);
+        const jmpf = this.emit(OP.JMPF, null);   // 条件假跳到 else 或结束
+        for (const s of node.thenBranch) this.stmt(s);
+        if (node.elseBranch) {
+          const jmpEnd = this.emit(OP.JMP, null);  // then 结束跳到最后（跳过 else）
+          this.code[jmpf][1] = this.code.length;    // 假 → else 开始
+          for (const s of node.elseBranch) this.stmt(s);
+          this.code[jmpEnd][1] = this.code.length;  // then → 结束
+        } else {
+          this.code[jmpf][1] = this.code.length;    // 假 → 直接结束
+        }
+        break;
+      }
       case "while": {
         const loopStart = this.code.length;
         this.expr(node.condition);
@@ -76,6 +106,25 @@ class Compiler {
         for (const s of node.body) this.stmt(s);
         this.emit(OP.JMP, loopStart);
         this.code[jmpf][1] = this.code.length;
+        break;
+      }
+      case "for": {
+        // for = init; while(cond) { body; incr }——脱糖成 while 结构
+        if (node.init) this.stmt(node.init);      // init 可能是 let 或赋值表达式
+        const loopStart = this.code.length;
+        if (node.condition) {
+          this.expr(node.condition);
+          const jmpf = this.emit(OP.JMPF, null);   // 条件假跳出
+          for (const s of node.body) this.stmt(s);
+          if (node.increment) this.expr(node.increment);
+          this.emit(OP.JMP, loopStart);
+          this.code[jmpf][1] = this.code.length;
+        } else {
+          // 无条件：无限循环（护栏在 VM run）
+          for (const s of node.body) this.stmt(s);
+          if (node.increment) this.expr(node.increment);
+          this.emit(OP.JMP, loopStart);
+        }
         break;
       }
       case "block":
@@ -108,9 +157,25 @@ class Compiler {
         this.emit(OP.ARRAY, node.items.length);
         break;
       }
+      case "dict": {
+        // 字典字面量：{"a":1,"b":2} → 依次 push 键值对，DICT n 拼装
+        for (const e of node.entries) {
+          this.emitConst(e.key);   // 键（字符串）
+          this.expr(e.value);      // 值
+        }
+        this.emit(OP.DICT, node.entries.length);
+        break;
+      }
       case "index": {
         this.expr(node.callee);
         this.expr(node.index);
+        this.emit(OP.IDX);
+        break;
+      }
+      case "getattr": {
+        // 属性访问 .len：编译成 callee["len"]（IDX 走字符串索引）
+        this.expr(node.callee);
+        this.emitConst(node.name);
         this.emit(OP.IDX);
         break;
       }
@@ -130,6 +195,7 @@ class Compiler {
         const map = {
           "+": OP.ADD, "-": OP.SUB, "*": OP.MUL, "/": OP.DIV,
           "==": OP.EQ, "!=": OP.NEQ, "<": OP.LT, "<=": OP.LTE, ">": OP.GT, ">=": OP.GTE,
+          "===": OP.EQEQEQ, "!==": OP.NEQEQ,
         };
         const op = map[node.operator.lexeme];
         if (!op) throw new Error(`compiler: 暂不支持运算符 ${node.operator.lexeme}`);
