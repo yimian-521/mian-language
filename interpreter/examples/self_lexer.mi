@@ -1,0 +1,163 @@
+// ── 免语言自举第一块砖：用免语言写的最小 lexer ──
+// 意义：语言第一次读自己的源码。这是自举的起点。
+// 能力：把 .mi 源码切成 token（字符串/数字/标识符/标点/运算符），
+//       纯字符扫描，只用索引 s[i] 逐字符读——不靠宿主字符串方法。
+// 说明：这是"借力打力"的实践——语言用自己能定义的一切，去定义它自己。
+
+// 关键字表：认识语言自己的词
+let keywords = {
+  "let": "LET", "print": "PRINT", "if": "IF", "then": "THEN", "else": "ELSE",
+  "done": "DONE", "return": "RETURN", "fun": "FUN", "true": "TRUE", "false": "FALSE",
+  "while": "WHILE", "for": "FOR", "import": "IMPORT"
+};
+
+// 单字符标点 → token 类型
+let puncts = {
+  "(": "LPAREN", ")": "RPAREN", "{": "LBRACE", "}": "RBRACE", ";": "SEMI",
+  ",": "COMMA", "[": "LBRACKET", "]": "RBRACKET", ".": "DOT", ":": "COLON",
+  "+": "PLUS", "-": "MINUS", "*": "STAR", "/": "SLASH"
+};
+
+// 判断字符类别（免语言没有 isDigit/isAlpha 原生函数，用比较自己定义）
+fun isDigit(c) { return c >= "0" && c <= "9"; }
+fun isAlpha(c) {
+  return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
+}
+fun isAlnum(c) { return isDigit(c) || isAlpha(c); }
+
+// ── 工具函数：免语言自给自足（不靠宿主）──
+// sub：取字符串区间（按字符索引）
+fun sub(s, from, to) {
+  let out = "";
+  let i = from;
+  while (i < to) { out = out + s[i]; i = i + 1; }
+  return out;
+}
+
+// append：往数组尾部追加元素，返回新数组
+fun append(arr, item) {
+  let out = arr;
+  let n = len(arr);
+  out = out + [item];   // 数组拼接
+  return out;
+}
+
+// ── 最小词法分析器：源字符串 → token 列表 ──
+// token 用字典表示：{ type, lexeme, line }
+fun lexMian(src) {
+  let tokens = [];
+  let i = 0;
+  let line = 1;
+  let n = len(src);
+
+  while (i < n) {
+    let c = src[i];
+
+    // 空白跳过（换行计数）
+    if (c == " " || c == "\t" || c == "\r") {
+      i = i + 1;
+    } else if (c == "\n") {
+      line = line + 1; i = i + 1;
+    } else if (c == "/" && i + 1 < n && src[i+1] == "/") {
+      // 注释：// 到行尾
+      while (i < n && src[i] != "\n") { i = i + 1; }
+    } else {
+      // 非空白/非注释——尝试匹配具体 token
+      let q = chr(34);   // 双引号字符
+      if (c == q) {
+        // 字符串：吃引号内全部
+        let start = i;
+        i = i + 1;
+        let unclosed = 1;
+        while (i < n && src[i] != q) { i = i + 1; }
+        if (i >= n) {
+          tokens = append(tokens, { "type": "ERROR", "lexeme": "未闭合字符串", "line": line });
+          unclosed = 0;
+        }
+        if (unclosed) {
+          i = i + 1;   // 吃掉右引号
+          let lit = sub(src, start, i);
+          tokens = append(tokens, { "type": "STRING", "lexeme": lit, "line": line });
+        }
+      } else if (isDigit(c)) {
+        // 数字：吃连续数字
+        let start = i;
+        while (i < n && isDigit(src[i])) { i = i + 1; }
+        let num = sub(src, start, i);
+        tokens = append(tokens, { "type": "NUMBER", "lexeme": num, "line": line });
+      } else if (isAlpha(c)) {
+        // 标识符或关键字：吃连续字母数字
+        let start = i;
+        while (i < n && isAlnum(src[i])) { i = i + 1; }
+        let word = sub(src, start, i);
+        let k = get(keywords, word, "");
+        let type = "IDENT";
+        if (k != "") { type = k; }
+        tokens = append(tokens, { "type": type, "lexeme": word, "line": line });
+      } else if (c == "=" && i + 1 < n && src[i+1] == "=") {
+        // == 或 ===
+        if (i + 2 < n && src[i+2] == "=") {
+          tokens = append(tokens, { "type": "EQ_EQ_EQ", "lexeme": "===", "line": line });
+          i = i + 3;
+        } else {
+          tokens = append(tokens, { "type": "EQ_EQ", "lexeme": "==", "line": line });
+          i = i + 2;
+        }
+      } else if (c == "!" && i + 1 < n && src[i+1] == "=") {
+        // != 或 !==
+        if (i + 2 < n && src[i+2] == "=") {
+          tokens = append(tokens, { "type": "BANG_EQ_EQ", "lexeme": "!==", "line": line });
+          i = i + 3;
+        } else {
+          tokens = append(tokens, { "type": "BANG_EQ", "lexeme": "!=", "line": line });
+          i = i + 2;
+        }
+      } else if (c == "&" && i + 1 < n && src[i+1] == "&") {
+        tokens = append(tokens, { "type": "AMPS", "lexeme": "&&", "line": line });
+        i = i + 2;
+      } else if (c == "|" && i + 1 < n && src[i+1] == "|") {
+        tokens = append(tokens, { "type": "PIPES", "lexeme": "||", "line": line });
+        i = i + 2;
+      } else if (c == "<" && i + 1 < n && src[i+1] == "=") {
+        tokens = append(tokens, { "type": "LT_EQ", "lexeme": "<=", "line": line });
+        i = i + 2;
+      } else if (c == ">" && i + 1 < n && src[i+1] == "=") {
+        tokens = append(tokens, { "type": "GT_EQ", "lexeme": ">=", "line": line });
+        i = i + 2;
+      } else {
+        // 单字符标点 / 赋值 / 感叹号 / 不认识
+        let p = get(puncts, c, "");
+        if (p) {
+          tokens = append(tokens, { "type": p, "lexeme": c, "line": line });
+          i = i + 1;
+        } else if (c == "=") {
+          tokens = append(tokens, { "type": "EQ", "lexeme": "=", "line": line });
+          i = i + 1;
+        } else if (c == "!") {
+          tokens = append(tokens, { "type": "BANG", "lexeme": "!", "line": line });
+          i = i + 1;
+        } else {
+          tokens = append(tokens, { "type": "ERROR", "lexeme": c, "line": line });
+          i = i + 1;
+        }
+      }
+    }
+  }
+
+  return tokens;
+}
+
+// ── 自测：扫描一段免语言源码，打印 token 流 ──
+let q = chr(34);   // 双引号字符
+let wordSeven = "seven";
+let sample = "let a = 1 + 2 * 3; print a; done a == 7 { print ";
+sample = sample + q + wordSeven + q + "; }";
+let toks = lexMian(sample);
+let count = len(toks);
+print "扫描到 " + str(count) + " 个 token:";
+let i = 0;
+while (i < count) {
+  let t = toks[i];
+  print t["type"] + " '" + t["lexeme"] + "' @行" + str(t["line"]);
+  i = i + 1;
+}
