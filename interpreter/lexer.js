@@ -9,7 +9,7 @@ const TOKEN = {
   IDENT: "IDENT",
   // 关键字
   LET: "LET", PRINT: "PRINT", IF: "IF", THEN: "THEN", ELSE: "ELSE", DONE: "DONE", RETURN: "RETURN", FUN: "FUN",
-  TRUE: "TRUE", FALSE: "FALSE", WHILE: "WHILE", FOR: "FOR", IMPORT: "IMPORT",
+  TRUE: "TRUE", FALSE: "FALSE", WHILE: "WHILE", FOR: "FOR", IMPORT: "IMPORT", REF: "REF",
   // 数组
   LBRACKET: "[", RBRACKET: "]",
   // 标点（边界符必须发声）
@@ -29,7 +29,7 @@ const TOKEN = {
 
 const KEYWORDS = new Map([
   ["let", "LET"], ["print", "PRINT"], ["if", "IF"], ["then", "THEN"], ["else", "ELSE"], ["done", "DONE"], ["return", "RETURN"], ["fun", "FUN"],
-  ["true", "TRUE"], ["false", "FALSE"], ["while", "WHILE"], ["for", "FOR"], ["import", "IMPORT"]
+  ["true", "TRUE"], ["false", "FALSE"], ["while", "WHILE"], ["for", "FOR"], ["import", "IMPORT"], ["ref", "REF"]
 ]);
 
 class Token {
