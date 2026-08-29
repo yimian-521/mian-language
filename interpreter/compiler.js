@@ -9,7 +9,7 @@ const OP = {
   NEG: "NEG", NOT: "NOT",
   EQ: "EQ", NEQ: "NEQ", LT: "LT", LTE: "LTE", GT: "GT", GTE: "GTE",
   EQEQEQ: "EQEQEQ", NEQEQ: "NEQEQ",
-  LOAD: "LOAD", STORE: "STORE", PRINT: "PRINT",
+  LOAD: "LOAD", STORE: "STORE", PRINT: "PRINT", REF: "REF",
   DUP: "DUP", POP: "POP",
   LAND: "LAND", LOR: "LOR",
   ARRAY: "ARRAY", IDX: "IDX",
@@ -144,6 +144,11 @@ class Compiler {
     switch (node.kind) {
       case "literal": this.emitConst(node.value); break;
       case "variable": this.emit(OP.LOAD, node.name); break;
+      case "ref": {
+        // ref x → OP.REF 'x'：运行时压入指向变量槽位的引用
+        this.emit(OP.REF, node.name);
+        break;
+      }
       case "assign": {
         // 赋值作为表达式：先算右值，DUP（左份）后 STORE（吃一份留一份）
         this.expr(node.value);
