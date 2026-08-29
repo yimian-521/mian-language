@@ -1,0 +1,37 @@
+// ── 自举模块 3：eval（独立，只提供 evalMian）──
+// 自递归求值：num / bin / var / call。环境用字典 + ref+write 绑定参数。
+
+fun evalMian(node, env) {
+  let kind = node["kind"];
+  done kind == "num" { return node["value"]; }
+  done kind == "bin" {
+    let l = evalMian(node["left"], env);
+    let r = evalMian(node["right"], env);
+    let op = node["op"];
+    done op == "+" { return l + r; }
+    done op == "-" { return l - r; }
+    done op == "*" { return l * r; }
+    done op == "/" { return l / r; }
+    return 0;
+  }
+  done kind == "var" { return get(env, node["name"], 0); }
+  done kind == "call" {
+    let child = {};
+    let i = 0;
+    while (i < len(node["params"])) {
+      let pn = node["params"][i];
+      let pv = evalMian(node["args"][i], env);
+      let slot = ref child[pn];
+      write(slot, pv);
+      i = i + 1;
+    }
+    let j = 0;
+    let last = 0;
+    while (j < len(node["body"])) {
+      last = evalMian(node["body"][j], child);
+      j = j + 1;
+    }
+    return last;
+  }
+  return 0;
+}
