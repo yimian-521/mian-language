@@ -44,6 +44,7 @@ if (arg1 === "test") {
   const suites = [
     ["主测试 50 例", "test_runner.js", ["--verbose"].filter(() => verbose).concat(stress ? ["--stress"] : [], thrArg ? [thrArg] : [])],
     ["报错库测试", "test_errors.js", []],
+    ["三身体对拍（解释器/VM/C++ 同时）", "test_tri_body.js", []],
     ["双身体对拍", "cross_mode_test.js", []],
     ["三身体对拍（C++ 原生）", "test_cpp_native.js", []],
     ["三件套（文件/进程/网络）", "test_stdlib.js", []],
