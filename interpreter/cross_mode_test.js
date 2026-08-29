@@ -22,6 +22,7 @@ async function runCompiled(source) {
   vm.globals.set("len", (x) => {
     if (typeof x === "string") return x.length;
     if (Array.isArray(x)) return x.length;
+    if (x && typeof x === "object") return Object.keys(x).length;
     throw Object.assign(new Error("len 只支持字符串或数组"), { name: "MianError" });
   });
   vm.globals.set("type", (x) => Array.isArray(x) ? "array" : typeof x);
