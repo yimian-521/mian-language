@@ -11,14 +11,15 @@
 #include <set>
 #include <stdexcept>
 #include <chrono>
+#include <iomanip>
 
 // ============ Token ============
 enum class TT {
     NUM, STR, IDENT,
-    KW_LET, KW_PRINT, KW_DONE, KW_WHILE, KW_FOR, KW_TRUE, KW_FALSE, KW_FUN, KW_RETURN, KW_IMPORT,
+    KW_LET, KW_PRINT, KW_DONE, KW_WHILE, KW_FOR, KW_IF, KW_ELSE, KW_TRUE, KW_FALSE, KW_FUN, KW_RETURN, KW_IMPORT,
     PLUS, MINUS, STAR, SLASH, EQ, EQEQ, EQEQEQ, NEQ, NEQEQ, LT, LTE, GT, GTE,
     ANDAND, OROR, BANG,
-    LPAREN, RPAREN, LBRACE, RBRACE, LBRACKET, RBRACKET, SEMI, COMMA, DOT,
+    LPAREN, RPAREN, LBRACE, RBRACE, LBRACKET, RBRACKET, SEMI, COMMA, COLON, DOT,
     END
 };
 
@@ -31,10 +32,10 @@ struct Token {
 
 // ============ AST ============
 enum class NK {
-    NUM, STR, VAR, LET, PRINT, DONE, WHILE, FOR, IMPORT,
+    NUM, STR, VAR, LET, PRINT, DONE, WHILE, FOR, IF, BLOCK_ELSE, IMPORT,
     UNARY, BIN, LOGIC, EXPR_STMT,
     FUN, CALL, RETURN,
-    ARR, INDEX, GETATTR
+    ARR, DICT, INDEX, GETATTR
 };
 
 struct Node {
@@ -62,15 +63,17 @@ struct ReturnSignal {
 
 // ============ 值 ============
 struct Val {
-    enum class T { NUM, STR, FN, ARR } t{T::NUM};
+    enum class T { NUM, STR, FN, ARR, DICT } t{T::NUM};
     double num{0};
     std::string str;
     const Node* fn{nullptr};
     std::vector<Val> arr;   // ARR：数组元素
+    std::map<std::string, Val> dict;   // DICT：键值对
     static Val n(double v) { Val x; x.t = T::NUM; x.num = v; return x; }
     static Val s(const std::string& v) { Val x; x.t = T::STR; x.str = v; return x; }
     static Val f(const Node* nd) { Val x; x.t = T::FN; x.fn = nd; return x; }
     static Val a(std::vector<Val> v) { Val x; x.t = T::ARR; x.arr = std::move(v); return x; }
+    static Val d(std::map<std::string, Val> v) { Val x; x.t = T::DICT; x.dict = std::move(v); return x; }
     bool truthy() const { return t == T::STR ? !str.empty() : (num != 0); }
 };
 
@@ -125,6 +128,7 @@ private:
             case '}': return make(TT::RBRACE, "}", ln);
             case ';': return make(TT::SEMI, ";", ln);
             case ',': return make(TT::COMMA, ",", ln);
+            case ':': return make(TT::COLON, ":", ln);
             case '[': return make(TT::LBRACKET, "[", ln);
             case ']': return make(TT::RBRACKET, "]", ln);
             case '.': return make(TT::DOT, ".", ln);
@@ -160,6 +164,8 @@ private:
                     if (s == "done")   return make(TT::KW_DONE, s, ln);
                     if (s == "while")  return make(TT::KW_WHILE, s, ln);
                     if (s == "for")    return make(TT::KW_FOR, s, ln);
+                    if (s == "if")     return make(TT::KW_IF, s, ln);
+                    if (s == "else")   return make(TT::KW_ELSE, s, ln);
                     if (s == "fun")    return make(TT::KW_FUN, s, ln);
                     if (s == "return") return make(TT::KW_RETURN, s, ln);
                     if (s == "import") return make(TT::KW_IMPORT, s, ln);
@@ -252,6 +258,23 @@ private:
             Node* cond = expression();
             consume(TT::LBRACE, "while 后面要跟 { 块");
             auto* n = new Node; n->k = NK::WHILE; n->l = cond; n->ks = block();
+            return n;
+        }
+        if (match(TT::KW_IF)) {
+            Node* cond = expression();
+            consume(TT::LBRACE, "if 后面要跟 { 块");
+            auto* n = new Node; n->k = NK::IF; n->l = cond; n->ks = block();
+            if (match(TT::KW_ELSE)) {
+                if (match(TT::KW_IF)) {
+                    // else if：链式——把嵌套 if 当 else 分支
+                    Node* nested = statement();  // 会再匹配 if
+                    n->r = nested;
+                } else {
+                    consume(TT::LBRACE, "else 后面要跟 { 块");
+                    auto* elseNode = new Node; elseNode->k = NK::BLOCK_ELSE; elseNode->ks = block();
+                    n->r = elseNode;
+                }
+            }
             return n;
         }
         if (match(TT::KW_FOR)) {
@@ -409,6 +432,23 @@ private:
             consume(TT::RBRACKET, "数组字面量要 ] 收尾");
             return n;
         }
+        // 字典字面量：{"name": "望安", "age": 3}
+        if (match(TT::LBRACE)) {
+            auto* n = new Node; n->k = NK::DICT;
+            if (!check(TT::RBRACE)) {
+                do {
+                    Token key = consume(TT::STR, "字典键要是字符串");
+                    consume(TT::COLON, "键后面要写 :");
+                    Node* val = expression();
+                    // 键值对存 ks：键节点(STR 存键名) + 值节点
+                    Node* kn = new Node; kn->k = NK::STR; kn->s = key.text;
+                    n->ks.push_back(kn);
+                    n->ks.push_back(val);
+                } while (match(TT::COMMA));
+            }
+            consume(TT::RBRACE, "字典要 } 收尾");
+            return n;
+        }
         if (match(TT::LPAREN)) {
             Node* e = expression();
             consume(TT::RPAREN, "右括号 ) 去哪了");
@@ -484,17 +524,32 @@ Val execStmt(const Node* nd, SC* sc) {
                 for (size_t i = 0; i < v.arr.size(); i++) {
                     if (i) std::cout << ", ";
                     const Val& e = v.arr[i];
-                    if (e.t == Val::T::NUM) { if (e.num == (long long)e.num) std::cout << (long long)e.num; else std::cout << e.num; }
+                    if (e.t == Val::T::NUM) { if (e.num == (long long)e.num) std::cout << (long long)e.num; else std::cout << std::setprecision(17) << e.num; }
                     else if (e.t == Val::T::STR) std::cout << "\"" << e.str << "\"";
                     else if (e.t == Val::T::ARR) std::cout << "[...]";
+                    else if (e.t == Val::T::DICT) std::cout << "{...}";
                     else std::cout << "<fun>";
                 }
                 std::cout << "]" << std::endl;
+            } else if (v.t == Val::T::DICT) {
+                std::cout << "{";
+                bool first = true;
+                for (const auto& [k, val] : v.dict) {
+                    if (!first) std::cout << ", ";
+                    first = false;
+                    std::cout << "\"" << k << "\": ";
+                    if (val.t == Val::T::NUM) { if (val.num == (long long)val.num) std::cout << (long long)val.num; else std::cout << std::setprecision(17) << val.num; }
+                    else if (val.t == Val::T::STR) std::cout << "\"" << val.str << "\"";
+                    else if (val.t == Val::T::ARR) std::cout << "[...]";
+                    else if (val.t == Val::T::DICT) std::cout << "{...}";
+                    else std::cout << "<fun>";
+                }
+                std::cout << "}" << std::endl;
             } else if (isBoolNode(nd->r)) {
                 std::cout << (v.num == 0 ? "false" : "true") << std::endl;
             } else if (v.t == Val::T::NUM) {
                 if (v.num == (long long)v.num) std::cout << (long long)v.num << std::endl;
-                else std::cout << v.num << std::endl;
+                else std::cout << std::setprecision(17) << v.num << std::endl;
             } else {
                 std::cout << v.str << std::endl;
             }
@@ -543,6 +598,24 @@ Val execStmt(const Node* nd, SC* sc) {
             }
             return last;
         }
+        case NK::IF: {
+            Val c = eval(nd->l, sc);
+            if (c.truthy()) {
+                Val last = Val::n(0);
+                for (auto* k : nd->ks) last = execStmt(k, sc);
+                return last;
+            } else if (nd->r) {
+                // else 分支：nd->r 指向 BLOCK_ELSE 或嵌套 IF
+                if (nd->r->k == NK::BLOCK_ELSE) {
+                    Val last = Val::n(0);
+                    for (auto* k : nd->r->ks) last = execStmt(k, sc);
+                    return last;
+                } else {
+                    return execStmt(nd->r, sc);  // else if 嵌套 IF
+                }
+            }
+            return Val::n(0);
+        }
         case NK::FOR: {
             Val last = Val::n(0);
             if (nd->init) eval(nd->init, sc);
@@ -570,6 +643,16 @@ Val eval(const Node* nd, SC* sc) {
             std::vector<Val> items;
             for (Node* k : nd->ks) items.push_back(eval(k, sc));
             return Val::a(items);
+        }
+        case NK::DICT: {
+            std::map<std::string, Val> obj;
+            // ks 成对：键节点(STR 存键名), 值节点, 键节点, 值节点...
+            for (size_t i = 0; i + 1 < nd->ks.size(); i += 2) {
+                Node* kn = nd->ks[i];
+                Node* vn = nd->ks[i + 1];
+                obj[kn->s] = eval(vn, sc);
+            }
+            return Val::d(obj);
         }
         case NK::VAR: {
             Val* p = lookup(sc, nd->s);
@@ -623,6 +706,13 @@ Val eval(const Node* nd, SC* sc) {
         case NK::INDEX: {
             Val target = eval(nd->l, sc);
             Val idxv = eval(nd->r, sc);
+            // 字典索引：d["key"]
+            if (target.t == Val::T::DICT) {
+                if (idxv.t != Val::T::STR) throw MIError("字典索引要是字符串");
+                auto it = target.dict.find(idxv.str);
+                if (it == target.dict.end()) throw MIError("字典没有键 '" + idxv.str + "'");
+                return it->second;
+            }
             if (target.t != Val::T::ARR) throw MIError("只能对数组用索引");
             if (idxv.t != Val::T::NUM) throw MIError("索引要是数字");
             long long i = (long long)idxv.num;
@@ -646,7 +736,8 @@ Val eval(const Node* nd, SC* sc) {
                     Val v = eval(nd->ks[0], sc);
                     if (v.t == Val::T::STR) return Val::n((double)v.str.size());
                     if (v.t == Val::T::ARR) return Val::n((double)v.arr.size());
-                    throw MIError("len 只支持字符串或数组");
+                    if (v.t == Val::T::DICT) return Val::n((double)v.dict.size());
+                    throw MIError("len 只支持字符串、数组或字典");
                 }
                 if (f.str == "type") {
                     if (nd->ks.size() != 1) throw MIError("type 需要 1 个参数");
