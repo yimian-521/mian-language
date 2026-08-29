@@ -300,6 +300,27 @@ class Parser {
   }
 
   unary() {
+    if (this.match(TOKEN.REF)) {
+      const kw = this.previous();
+      // ref 目标：ref x（变量）或 ref a[0] / ref d["k"]（容器元素），也支持 ref a[0][1] 链
+      // 解析成"可寻址路径"节点（容器 + 索引链），不求值
+      if (this.check(TOKEN.IDENT)) {
+        const nameTok = this.advance();
+        // 检查是否有后续索引链 [0] / ["k"]
+        const indices = [];
+        while (this.match(TOKEN.LBRACKET)) {
+          const idx = this.expression();
+          this.consume(TOKEN.RBRACKET, "索引要 ] 收尾");
+          indices.push(idx);
+        }
+        if (indices.length === 0) {
+          return { kind: "ref", name: nameTok.lexeme, line: kw.line };
+        }
+        // 有索引链：ref a[0] 或 ref a[0][1] —— 目标是容器元素
+        return { kind: "refElem", name: nameTok.lexeme, indices, line: kw.line };
+      }
+      throw this.error(this.peek(), "ref 后面要跟一个可引用的目标（变量名或 容器[索引]）");
+    }
     if (this.match(TOKEN.BANG, TOKEN.MINUS)) {
       const operator = this.previous();
       const right = this.unary();
