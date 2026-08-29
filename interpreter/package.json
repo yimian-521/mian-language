@@ -1,0 +1,21 @@
+{
+  "name": "mian-language",
+  "version": "0.1.0",
+  "description": "免语言（Mian）—— Python 级写感 + C 级性能的原创编程语言。手写解释器 + 字节码 VM + C++ 原生执行器三身体，值强度 / 五段账本 / done 定性态原创概念。",
+  "main": "mian.js",
+  "bin": {
+    "mian": "mian.js"
+  },
+  "scripts": {
+    "test": "node mian.js test",
+    "start": "node mian.js",
+    "repl": "node repl.js",
+    "build:native": "node build_native.js"
+  },
+  "keywords": ["mian", "免语言", "programming-language", "interpreter", "vm", "native"],
+  "author": "免免 & 望安",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
+}
