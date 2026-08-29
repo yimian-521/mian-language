@@ -25,6 +25,18 @@ async function runCompiled(source) {
   vm.globals.set("type", (x) => Array.isArray(x) ? "array" : typeof x);
   vm.globals.set("str", (x) => String(x));
   vm.globals.set("clock", () => Date.now());
+  // read/write：操作 ref 引用指向的变量槽位
+  vm.globals.set("read", (r) => {
+    if (!r || r.kind !== "ref") throw Object.assign(new Error("read 的参数必须是 ref 创建的引用"), { name: "MianError" });
+    if (!r.target.map.has(r.target.name)) throw Object.assign(new Error(`引用指向的变量 '${r.target.name}' 已被销毁（悬垂引用）`), { name: "MianError" });
+    return r.target.map.get(r.target.name);
+  });
+  vm.globals.set("write", (r, v) => {
+    if (!r || r.kind !== "ref") throw Object.assign(new Error("write 的第一个参数必须是 ref 创建的引用"), { name: "MianError" });
+    if (!r.target.map.has(r.target.name)) throw Object.assign(new Error(`引用指向的变量 '${r.target.name}' 已被销毁（悬垂引用）`), { name: "MianError" });
+    r.target.map.set(r.target.name, v);
+    return v;
+  });
   let result = null, runtimeError = null;
   try {
     const r = await vm.run();
@@ -105,6 +117,7 @@ async function main() {
     { name: "字典", source: 'let d = {"name": "望安"}; print d["name"]; print len(d);' },
     { name: "if/else", source: 'let a = 5; if a > 3 { print "大"; } else { print "小"; }' },
     { name: "=== 严格比较", source: 'print 1 === "1"; print 1 === 1;' },
+    { name: "ref 引用", source: "let x = 5; let r = ref x; print read(r); write(r, 99); print read(r); print x;" },
     { name: "报错一致", source: 'let x = 1 + "a";' },
   ];
   const report = await triBody(programs);
