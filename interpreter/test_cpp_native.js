@@ -19,6 +19,7 @@ const CASES = [
   ["函数与递归", "fun fib(n) { done n < 2 { return n; } return fib(n-1) + fib(n-2); } print fib(10);"],
   ["数组求和", "let a = [1, 2, 3, 4]; let i = 0; let s = 0; while (i < len(a)) { s = s + a[i]; i = i + 1; } print s; print a[2];"],
   ["字符串与.len", 'let h = "hello"; print h.len; print len("abc"); print str(7);'],
+  ["ref 引用", "let x = 5; let r = ref x; print read(r); write(r, 99); print read(r); print x;"],
   ["类型回禀", "print type(42); print type(\"x\"); print type([1,2]);"],
   ["赋值换值", "let x = 0; x = 7; print x;"],
   ["逻辑与比较", "print 5 > 3 && 5 < 10; print !false;"],
