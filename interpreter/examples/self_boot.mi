@@ -22,3 +22,79 @@ let toks2 = lexMian(source2);
 let pr2 = parseExpr(toks2, 0, 1);
 print "源码2: " + source2;
 print "结果2: " + str(evalMian(pr2["ast"], {}));
+
+// ── 里程碑：自举解析"定义函数 + 调用"──
+// 源码：fun add(a,b){ a + b } add(10,5)
+let source3 = "fun add(a,b){ a + b } add(10,5)";
+let toks3 = lexMian(source3);
+let stmts3 = parseProgram(toks3, 0);
+// 先执行 fun 定义（存入环境），再执行调用
+let env3 = {};
+let i3 = 0;
+let result3 = 0;
+while (i3 < len(stmts3)) {
+  result3 = evalMian(stmts3[i3], env3);
+  i3 = i3 + 1;
+}
+print "源码3: " + source3;
+print "语句数: " + str(len(stmts3));
+print "结果3: " + str(result3);
+
+// ── 里程碑：自举 eval 支持完整语句（let + if + 比较）──
+// 手写 AST：let x = 5; if x > 3 { 100 } else { 200 }
+let env4 = {};
+let letAst = { "kind": "let", "name": "x", "value": { "kind": "num", "value": 5 } };
+evalMian(letAst, env4);
+let ifAst = { "kind": "if",
+  "condition": { "kind": "bin", "op": ">", "left": { "kind": "var", "name": "x" }, "right": { "kind": "num", "value": 3 } },
+  "then": { "kind": "num", "value": 100 },
+  "else": { "kind": "num", "value": 200 } };
+let r4 = evalMian(ifAst, env4);
+print "let+if: x=5, x>3 → " + str(r4);
+
+// 比较运算符
+let cmp = evalMian({ "kind": "bin", "op": "==", "left": { "kind": "num", "value": 5 }, "right": { "kind": "num", "value": 5 } }, {});
+print "比较: 5==5 → " + str(cmp);
+
+// ── 真正自举闭环：源码完整走 lexer → parser → eval，处理 let/print ──
+// 源码（纯数字，避开字符串转义限制）：let x = 5; print x + 3;
+let source5 = "let x = 5; print x + 3;";
+let toks5 = lexMian(source5);
+let stmts5 = parseProgram(toks5, 0);
+let env5 = {};
+let i5 = 0;
+let out5 = [];
+while (i5 < len(stmts5)) {
+  let r = evalMian(stmts5[i5], env5);
+  if (stmts5[i5]["kind"] == "print") { out5 = append(out5, r); }
+  i5 = i5 + 1;
+}
+print "自举源码: " + source5;
+print "语句数: " + str(len(stmts5));
+print "自举输出: " + str(out5[0]);
+
+// ── 自举 while 循环：while (i < 5) { s = s + i; i = i + 1; } print s; ──
+let source6 = "let i = 0; let s = 0; while (i < 5) { s = s + i; i = i + 1; } print s;";
+let toks6 = lexMian(source6);
+let stmts6 = parseProgram(toks6, 0);
+let env6 = {};
+let i6 = 0;
+let result6 = 0;
+while (i6 < len(stmts6)) {
+  result6 = evalMian(stmts6[i6], env6);
+  i6 = i6 + 1;
+}
+print "自举 while 求和: " + str(result6);
+
+// ── 自举 if + 布尔字面量：if x > 3 { 100 } else { 200 } ──
+let source7 = "let x = 5; if x > 3 { 100 } else { 200 }";
+let toks7 = lexMian(source7);
+let stmts7 = parseProgram(toks7, 0);
+let env7 = {};
+let i7 = 0;
+let result7 = 0;
+while (i7 < len(stmts7)) {
+  result7 = evalMian(stmts7[i7], env7);
+  i7 = i7 + 1;
+}
+print "自举 if(x>3): " + str(result7);
