@@ -3,12 +3,38 @@
 > 语义化版本（SemVer）：主版本.次版本.修订号
 > 不兼容变更 → 主版本；新增功能 → 次版本；bug修复 → 修订号
 
+## v0.5.0（2026-08-30）
+🧩 语法补全 + 自举完整化：免语言"自己吃自己"——一段带循环/条件/函数/赋值的完整 .mi 源码，经过免语言自己写的 lexer → parser → eval，一路自举到底。
+
+### 自举完整化（核心里程碑）
+自举三件套（boot_lex/boot_parse/boot_eval）现在能完整处理带语句的免语言程序：
+- **表达式**：算术 / 比较 / 字符串 / 布尔 / 函数调用 / 变量
+- **语句**：`let` / `print` / `fun` 定义 / `while` 循环 / `if/else` 条件 / 赋值
+- **验证**：`self_boot.mi` 全部跑通——算术 7 / 函数 15 / let+print 8 / while 求和 10 / if 条件 100
+- `boot_parse.mi` 新增：布尔字面量 `true`/`false`、字符串字面量（剥引号）、`if/else` 语句、赋值（`=` 右结合）、比较运算符（优先级正确）
+- `boot_eval.mi` 新增：`let`/`assign`/`print`/`if`/`done`/`while`/`str`/`bool` 求值；body 循环内联避免闭包互引
+
+### 语法补全（该补的 4 项全部落地）
+- **`break`/`continue`**：信号类（MianBreakSignal/MianContinueSignal），while/for 都支持，记账
+- **`d[k] = v` 动态加键**：字典直接加键、数组改元素，Python 同款写感
+- **函数互引**：`MianFunction` 加 `globalEnv`，快照缺失懒查全局注册表，不破坏闭包 D15
+- **三元 `? :`**：右结合，记账 `ternary_branch`
+
+### 踩坑（留给后续开发者最值钱的经验）
+- `isTruthy("") === true` —— 空字符串是真值！`boot_lex.mi` 里 `if(get(puncts,c,""))` 把空串当真，`=` 一直产出空类型 token，赋值解析完整跑偏。修复：`if(p != "")` 而非 `if(p)`
+- `self_lexer` 漏了孤立的 `<` 和 `>` 单字符 token（`puncts` 表缺了它们）
+- 免语言无 `break`/`continue`/三元 `?:` —— 都已补上
+
+### 三身体
+- 三身体对拍 13/13 一致，C++ 对拍 12/12 一致
+- `mian test` 82/82 全绿（新增 5 例：break/continue/动态加键/三元/函数互引）
+
 ## v0.4.0（2026-08-29）
 🧱 自举闭环：语言第一次"解释自己"——一段 .mi 源码，经过免语言自己写的 lexer → parser → eval，一路自举到底。
 
 ### 自举（三块砖模块化组装）
-这是里程碑式的推进：不是焊成一个文件，而是像 C 的 `.c` 单元 + 头文件、像 Go 的 package + import——三段独立模块通过 `import` 组装，各自完成一个阶段：
-- **`boot_lex.mi`**：源码 → token 流（21 种 token 类型，含字符串/数字/运算符/关键字）
+不是焊成一个文件，而是像 C 的 `.c` 单元 + 头文件、像 Go 的 package + import——三段独立模块通过 `import` 组装：
+- **`boot_lex.mi`**：源码 → token 流（21 种 token 类型）
 - **`boot_parse.mi`**：token → AST（优先级爬升单函数自递归，* / 高于 + -，支持括号）
 - **`boot_eval.mi`**：AST → 值（数字/二元运算/变量/函数调用，环境用 ref+write 绑定参数）
 - **`self_boot.mi`**：主程序 import 三块，一次执行三次——`1+2*3=7`、`2+3*4=14` 一路自举解释正确
@@ -23,12 +49,6 @@
 - **VM 字节码**：compiler 加 `OP.REF` 指令，VM 压入指向变量槽位的引用
 - **C++ 原生执行器**：Val 加 `REF` 类型，lexer/parser/求值器/read/write 全支持
 - 三身体对拍从 12/12 升到 13/13（ref 引用用例），`mian test` 9 组全绿，主测试 77/77
-
-### 踩坑记录（留给后续开发者）
-- 免语言不支持三元 `?:` → 用 if/else 替代
-- `done` 不带 else → 用 if/else if 链
-- 函数互引在闭包快照下失效 → parseExpr 纯自递归（优先级爬升）
-- 字符串与数字混拼报错 → 数字用 `str()` 包
 
 ## v0.3.0（2026-08-29）
 🧷 指针索引落地：`ref`/`read`/`write` 引用三件套。
