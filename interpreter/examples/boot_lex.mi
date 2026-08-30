@@ -8,7 +8,8 @@ let keywords = {
 let puncts = {
   "(": "LPAREN", ")": "RPAREN", "{": "LBRACE", "}": "RBRACE", ";": "SEMI",
   ",": "COMMA", "[": "LBRACKET", "]": "RBRACKET", ".": "DOT", ":": "COLON",
-  "+": "PLUS", "-": "MINUS", "*": "STAR", "/": "SLASH"
+  "+": "PLUS", "-": "MINUS", "*": "STAR", "/": "SLASH",
+  "<": "LT", ">": "GT"
 };
 fun isDigit(c) { return c >= "0" && c <= "9"; }
 fun isAlpha(c) { return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"; }
@@ -50,7 +51,7 @@ fun lexMian(src) {
         else { tokens = append(tokens, { "type": "BANG_EQ", "lexeme": "!=", "line": line }); i = i + 2; }
       } else {
         let p = get(puncts, c, "");
-        if (p) { tokens = append(tokens, { "type": p, "lexeme": c, "line": line }); i = i + 1; }
+        if (p != "") { tokens = append(tokens, { "type": p, "lexeme": c, "line": line }); i = i + 1; }
         else if (c == "=") { tokens = append(tokens, { "type": "EQ", "lexeme": "=", "line": line }); i = i + 1; }
         else if (c == "!") { tokens = append(tokens, { "type": "BANG", "lexeme": "!", "line": line }); i = i + 1; }
         else { i = i + 1; }
