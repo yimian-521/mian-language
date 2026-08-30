@@ -3,18 +3,25 @@
 // 这样免语言闭包快照下函数不会互相看不见（A 只调 A，自递归）。
 // 优先级：* / = 2，+ - = 1，括号递归下降。
 
-// 运算符优先级：* / = 2，+ - = 1，其他 = 0
+// 运算符优先级：乘除=3，加减=2，比较=1，其他=0
+// token 名对照 self_lexer：== EQ_EQ, != BANG_EQ, < LT, <= LT_EQ, > GT, >= GT_EQ
 fun precOf(tok) {
-  done tok["type"] == "STAR" { return 2; }
-  done tok["type"] == "SLASH" { return 2; }
-  done tok["type"] == "PLUS" { return 1; }
-  done tok["type"] == "MINUS" { return 1; }
+  done tok["type"] == "STAR" { return 3; }
+  done tok["type"] == "SLASH" { return 3; }
+  done tok["type"] == "PLUS" { return 2; }
+  done tok["type"] == "MINUS" { return 2; }
+  done tok["type"] == "EQ_EQ" { return 1; }
+  done tok["type"] == "BANG_EQ" { return 1; }
+  done tok["type"] == "LT" { return 1; }
+  done tok["type"] == "LT_EQ" { return 1; }
+  done tok["type"] == "GT" { return 1; }
+  done tok["type"] == "GT_EQ" { return 1; }
   return 0;
 }
 
 // 优先级爬升：唯一递归函数，原子解析内联（if/else if 链）
 fun parseExpr(toks, i, minPrec) {
-  // ── 原子（内联解析：数字 / 变量 / 括号）──
+  // ── 原子（内联解析：数字 / 变量 / 函数调用 / 括号）──
   let atom = { "kind": "num", "value": 0 };
   let acur = i;
   if (i < len(toks)) {
@@ -22,6 +29,35 @@ fun parseExpr(toks, i, minPrec) {
     if (t["type"] == "NUMBER") {
       atom = { "kind": "num", "value": num(t["lexeme"]) };
       acur = i + 1;
+    } else if (t["type"] == "STRING") {
+      // 字符串字面量：lexeme 带引号，剥掉两侧引号
+      let lit = t["lexeme"];
+      atom = { "kind": "str", "value": sub(lit, 1, len(lit) - 1) };
+      acur = i + 1;
+    } else if (t["type"] == "TRUE") {
+      atom = { "kind": "bool", "value": 1 };   // 免语言真值：1 表示真
+      acur = i + 1;
+    } else if (t["type"] == "FALSE") {
+      atom = { "kind": "bool", "value": 0 };   // 0 表示假
+      acur = i + 1;
+    } else if (t["type"] == "IDENT" && i + 1 < len(toks) && toks[i+1]["type"] == "LPAREN") {
+      // 函数调用：name( arg, arg, ... )
+      let name = t["lexeme"];
+      let args = [];
+      let cur = i + 2;   // 跳过 ( 
+      if (cur < len(toks) && toks[cur]["type"] != "RPAREN") {
+        // 至少一个参数
+        let first = parseExpr(toks, cur, 1);
+        args = append(args, first["ast"]);
+        cur = first["cur"];
+        while (cur < len(toks) && toks[cur]["type"] == "COMMA") {
+          let nxt = parseExpr(toks, cur + 1, 1);
+          args = append(args, nxt["ast"]);
+          cur = nxt["cur"];
+        }
+      }
+      atom = { "kind": "call", "name": name, "args": args };
+      acur = cur + 1;   // 跳过 )
     } else if (t["type"] == "IDENT") {
       atom = { "kind": "var", "name": t["lexeme"] };
       acur = i + 1;
@@ -34,13 +70,137 @@ fun parseExpr(toks, i, minPrec) {
 
   let ast = atom;
   let cur = acur;
-  while (cur < len(toks)) {
+  // 赋值：var = value（右结合）——只有 atom 是变量才能赋值
+  if (atom["kind"] == "var" && cur < len(toks) && toks[cur]["type"] == "EQ") {
+    let v = parseExpr(toks, cur + 1, 1);
+    return { "ast": { "kind": "assign", "name": atom["name"], "value": v["ast"] }, "cur": v["cur"] };
+  }
+  let goon = 1;
+  while (goon == 1 && cur < len(toks)) {
     let p = precOf(toks[cur]);
-    if (p < minPrec) { break; }
-    let op = toks[cur];
-    let right = parseExpr(toks, cur + 1, p + 1);
-    ast = { "kind": "bin", "op": op["lexeme"], "left": ast, "right": right["ast"] };
-    cur = right["cur"];
+    if (p < minPrec) { goon = 0; }
+    else {
+      let op = toks[cur];
+      let right = parseExpr(toks, cur + 1, p + 1);
+      ast = { "kind": "bin", "op": op["lexeme"], "left": ast, "right": right["ast"] };
+      cur = right["cur"];
+    }
   }
   return { "ast": ast, "cur": cur };
+}
+
+// 解析程序：fun 定义 或 表达式，返回语句数组
+// fun name(param, param){ body } → { kind:"fun", name, params, body }
+fun parseProgram(toks, i) {
+  let stmts = [];
+  let cur = i;
+  while (cur < len(toks)) {
+    if (toks[cur]["type"] == "FUN") {
+      // fun 定义
+      let name = toks[cur + 1]["lexeme"];
+      let p = cur + 3;   // 跳过 fun name (
+      let params = [];
+      if (toks[p]["type"] != "RPAREN") {
+        params = append(params, toks[p]["lexeme"]);
+        p = p + 1;
+        while (toks[p]["type"] == "COMMA") {
+          params = append(params, toks[p + 1]["lexeme"]);
+          p = p + 2;
+        }
+      }
+      // p 现在指向 )，跳过它到 {
+      let body = [];
+      let b = p + 2;   // 跳过 ) {
+      while (toks[b]["type"] != "RBRACE") {
+        // body 里的表达式（简化：每个用 ; 或 } 分隔，这里直接 parseExpr 到下一个边界）
+        if (toks[b]["type"] == "SEMI") {
+          b = b + 1;
+        } else {
+          let e = parseExpr(toks, b, 1);
+          body = append(body, e["ast"]);
+          b = e["cur"];
+        }
+      }
+      stmts = append(stmts, { "kind": "fun", "name": name, "params": params, "body": body });
+      cur = b + 1;   // 跳过 }
+    } else if (toks[cur]["type"] == "LET") {
+      // let 声明：let name = value;
+      let name = toks[cur + 1]["lexeme"];
+      let eq = cur + 2;   // 跳过 name =  → 实际指向 =
+      // eq 应在 = 处，值从 eq+1 开始
+      let v = parseExpr(toks, eq + 1, 1);
+      stmts = append(stmts, { "kind": "let", "name": name, "value": v["ast"] });
+      cur = v["cur"];
+      // 跳过 ;
+      if (cur < len(toks) && toks[cur]["type"] == "SEMI") { cur = cur + 1; }
+    } else if (toks[cur]["type"] == "PRINT") {
+      // print 语句：print value;
+      let v = parseExpr(toks, cur + 1, 1);
+      stmts = append(stmts, { "kind": "print", "value": v["ast"] });
+      cur = v["cur"];
+      if (cur < len(toks) && toks[cur]["type"] == "SEMI") { cur = cur + 1; }
+    } else if (toks[cur]["type"] == "IF") {
+      // if 语句：if condition { thenBranch } else { elseBranch }
+      let cond = parseExpr(toks, cur + 1, 1);   // 跳过 if
+      let b = cond["cur"];
+      // 跳过 { 前的 )
+      if (b < len(toks) && toks[b]["type"] == "RPAREN") { b = b + 1; }
+      if (b < len(toks) && toks[b]["type"] == "LBRACE") { b = b + 1; }
+      // 解析 then 分支（单表达式）
+      let thenBody = parseExpr(toks, b, 1);
+      b = thenBody["cur"];
+      if (b < len(toks) && toks[b]["type"] == "RBRACE") { b = b + 1; }
+      // 解析 else 分支（如果有）
+      let elseBody = { "kind": "num", "value": 0 };
+      if (b < len(toks) && toks[b]["type"] == "ELSE") {
+        if (b + 1 < len(toks) && toks[b+1]["type"] == "LBRACE") { b = b + 2; }
+        let eb = parseExpr(toks, b, 1);
+        elseBody = eb["ast"];
+        b = eb["cur"];
+        if (b < len(toks) && toks[b]["type"] == "RBRACE") { b = b + 1; }
+      }
+      stmts = append(stmts, { "kind": "if", "condition": cond["ast"], "then": thenBody["ast"], "else": elseBody });
+      cur = b;
+    } else if (toks[cur]["type"] == "WHILE") {
+      // while 循环：while ( condition ) { body }
+      // self_lexer: while ( cond ) { stmts } → tokens: WHILE LPAREN ... RPAREN LBRACE ... RBRACE
+      let condStart = cur + 2;   // 跳过 while (
+      let cond = parseExpr(toks, condStart, 1);   // 条件：minPrec=1，遇 ) 停（prec0）
+      // 现在 cur 指向 ) 之后，应到 { 
+      let b = cond["cur"];
+      if (b < len(toks) && toks[b]["type"] == "RPAREN") { b = b + 1; }
+      if (b < len(toks) && toks[b]["type"] == "LBRACE") { b = b + 1; }
+      let body = [];
+      while (b < len(toks) && toks[b]["type"] != "RBRACE") {
+        if (toks[b]["type"] == "SEMI") { b = b + 1; }
+        else if (toks[b]["type"] == "PRINT") {
+          // body 里 print：print value;
+          let pv = parseExpr(toks, b + 1, 1);
+          body = append(body, { "kind": "print", "value": pv["ast"] });
+          b = pv["cur"];
+          if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
+        } else if (toks[b]["type"] == "LET") {
+          // body 里 let：let name = value;
+          let nm = toks[b + 1]["lexeme"];
+          let lv = parseExpr(toks, b + 3, 1);
+          body = append(body, { "kind": "let", "name": nm, "value": lv["ast"] });
+          b = lv["cur"];
+          if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
+        } else {
+          let e = parseExpr(toks, b, 1);
+          body = append(body, e["ast"]);
+          b = e["cur"];
+        }
+      }
+      stmts = append(stmts, { "kind": "while", "condition": cond["ast"], "body": body });
+      cur = b + 1;   // 跳过 }
+    } else if (toks[cur]["type"] == "SEMI") {
+      cur = cur + 1;
+    } else {
+      let e = parseExpr(toks, cur, 1);
+      stmts = append(stmts, e["ast"]);
+      cur = e["cur"];
+    }
+  }
+  return stmts;
 }
