@@ -34,16 +34,22 @@ class MianReturnSignal {
   constructor(mv) { this.mv = mv; }
 }
 
+// break / continue 的控制流真身：循环截断信号
+class MianBreakSignal { }
+class MianContinueSignal { }
+
 // 函数是值
 class MianFunction {
   // closureEnv = 定义时刻的环境冻结快照（第11章研案：闭包应捕获声明时刻的冻结快照，
   // 不是调用者的活环境。否则"函数是值传出去后原环境变了"就会看到新值=动态作用域泄漏）
-  constructor(name, params, body, closureEnv = null) {
+  // globalEnv = 顶层活环境引用（函数互引时，快照里缺失的名字懒查到它）
+  constructor(name, params, body, closureEnv = null, globalEnv = null) {
     this.name = name;
     this.params = params;
     this.body = body;
     this.arity = params.length;
     this.closureEnv = closureEnv;
+    this.globalEnv = globalEnv;
   }
   toString() { return `<fun ${this.name}>`; }
 }
@@ -104,6 +110,7 @@ async function callMianFunction(fn, args, parentEvaluator) {
       ledger: parentEvaluator ? parentEvaluator.ledgerEnabled : true,
       ledgerInstance: parentEvaluator ? parentEvaluator.ledger : null,
       env: childEnv,
+      globalEnv: fn.globalEnv || (parentEvaluator ? parentEvaluator.globalEnv : null),
       out: [],
       builtins: parentEvaluator ? parentEvaluator.builtins : null,
       stdlib: false,
@@ -148,6 +155,8 @@ class Evaluator {
     this.ledgerEnabled = options.ledger !== false;
     this.ledger = options.ledgerInstance || new Ledger(this.ledgerEnabled);
     this.env = options.env || new Map();
+    // 全局注册表：顶层活环境（函数互引用它懒查未定义时缺失的名字）
+    this.globalEnv = options.globalEnv || this.env;
     this.out = options.out || [];
     this.builtins = options.builtins || null;
     this.machineHands = options.machineHands || null;  // 机器三件套（文件/网络/进程等宿主手）
@@ -312,7 +321,7 @@ class Evaluator {
         // 之后哪怕原环境变量被重新赋值，闭包也看不见新值。
         // 存储段记账点：值被"留住"的时刻，正是这里。
         const snapshot = freezeEnv(this.env);
-        const fn = new MianFunction(node.name, node.params, node.body, snapshot);
+        const fn = new MianFunction(node.name, node.params, node.body, snapshot, this.globalEnv);
         const fnValue = new MianValue(fn, node.staticStrength || STRENGTH.STRONG, `fun ${node.name}`);
         // 递归自引用：把函数自己写进快照，函数体内就能看见自己
         snapshot.set(node.name, fnValue);
@@ -329,10 +338,14 @@ class Evaluator {
         for (const s of node.statements) {
           const v = await this.execute(s);
           if (v instanceof MianReturnSignal) return v;
+          if (v instanceof MianBreakSignal) return v;    // 向上传，让循环捕获
+          if (v instanceof MianContinueSignal) return v;
           r = v;
         }
         return r;
       }
+      case "break": return new MianBreakSignal();
+      case "continue": return new MianContinueSignal();
       case "exprStmt": return this.evaluate(node.expr);
       case "import": return this.execImport(node);
       default: return this.evaluate(node);
@@ -434,6 +447,8 @@ class Evaluator {
       for (const s of node.body) {
         const v = await this.execute(s);
         if (v instanceof MianReturnSignal) return v;
+        if (v instanceof MianBreakSignal) { this.ledger.record("while_break"); return last; }   // break：跳出整个循环
+        if (v instanceof MianContinueSignal) { this.ledger.record("while_continue"); break; }    // continue：跳出本次循环体，重查条件
         last = v;
       }
       if (++steps > this.loopLimit) {
@@ -455,9 +470,12 @@ class Evaluator {
           break;
         }
       }
+      let cont = false;   // continue 是否触发（跳过 increment 后的重查）
       for (const s of node.body) {
         const v = await this.execute(s);
         if (v instanceof MianReturnSignal) return v;
+        if (v instanceof MianBreakSignal) { this.ledger.record("for_break"); return last; }   // break：跳出整个循环
+        if (v instanceof MianContinueSignal) { this.ledger.record("for_continue"); cont = true; break; }  // continue：跑 increment 后重查
         last = v;
       }
       if (node.increment) await this.evaluate(node.increment);
@@ -475,6 +493,10 @@ class Evaluator {
         return new MianValue(node.value, staticOf(node), "literal");
       case "variable": {
         const slot = this.env.get(node.name);
+        if (slot === undefined && this.globalEnv && this.globalEnv !== this.env && this.globalEnv.has(node.name)) {
+          // 懒查找：快照里缺失的顶层名字，回退到全局注册表（函数互引的关键）
+          return this.globalEnv.get(node.name);
+        }
         if (slot === undefined) throw new MianError(errFmt(ME.E081.msg, { name: node.name }), node.line, node.col, ME.E081.kind, ME.E081.level || "error", "E081");
         return slot;   // 变量携带它自己出生时的强度
       }
@@ -552,6 +574,14 @@ class Evaluator {
         const right = await this.evaluate(node.right);
         return new MianValue(node.operator === "&&" ? isTruthy(left.value) && isTruthy(right.value) : isTruthy(left.value) || isTruthy(right.value), staticOf(node), "logical");
       }
+      case "ternary": {
+        // 三元 = 或许态：条件成立走真分支，否则走假分支（跟 if 一样记账）
+        const c = await this.evaluate(node.condition);
+        const chosen = isTruthy(c.value) ? "then" : "else";
+        this.ledger.record("ternary_branch", { chosen, cond: summarize(c), strength: c.strength });
+        const branch = isTruthy(c.value) ? node.thenBranch : node.elseBranch;
+        return await this.evaluate(branch);
+      }
       case "array": {
         const items = await Promise.all(node.items.map(i => this.evaluate(i)));
         const arr = items.map(m => m.value);
@@ -607,6 +637,25 @@ class Evaluator {
       case "assign": {
         // 赋值=有时效承诺：旧承诺作废，新值入簿
         const mv = await this.evaluate(node.value);
+        // 支持索引赋值：d["k"] = v / a[0] = v
+        if (node.name.kind === "index") {
+          const target = await this.evaluate(node.name.callee);
+          const idx = await this.evaluate(node.name.index);
+          const key = idx.value;
+          const v = target.value;
+          if (Array.isArray(v)) {
+            if (typeof key !== "number") throw new MianError(errFmt(ME.E204.msg, {}), node.line, node.col, ME.E204.kind, ME.E204.level || "error", "E204");
+            if (key < 0 || key >= v.length) throw new MianError(errFmt(ME.E701.msg, { len: v.length, idx: key }), node.line, node.col, ME.E701.kind, ME.E701.level || "error", "E701");
+            v[key] = mv.value;
+          } else if (v && typeof v === "object") {
+            if (typeof key !== "string") throw new MianError(errFmt(ME.E205.msg, {}), node.line, node.col, ME.E205.kind, ME.E205.level || "error", "E205");
+            v[key] = mv.value;  // 动态加键（Python 同款写感）
+          } else {
+            throw new MianError(errFmt(ME.E901.msg, {}), node.line, node.col, ME.E901.kind, ME.E901.level || "error", "E901");
+          }
+          this.ledger.birth(mv, `assign index`);
+          return mv;
+        }
         const name = node.name.kind === "variable" ? node.name.name : null;
         if (!name) throw new MianError(errFmt(ME.E912.msg, {}), node.line, node.col, ME.E912.kind, ME.E912.level || "error", "E912");
         const rebound = new MianValue(mv.value, staticOf(node), `assign ${name}`);
@@ -730,6 +779,7 @@ class Evaluator {
       ledger: this.ledgerEnabled,
       ledgerInstance: this.ledger,
       env: childEnv,
+      globalEnv: fn.globalEnv || this.globalEnv,
       out: this.out,
       builtins: this.builtins,
       stdlib: false,   // 标准库只在顶层注册，子环境继承 env 已有
