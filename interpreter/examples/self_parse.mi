@@ -1,0 +1,80 @@
+// ── 免语言自举第三块砖：用免语言写的 parser（token → AST）──
+// 意义：语言第一次把"自己的 token 流"组装成"自己能解释的 AST"。
+// 当前能力：数字 / 变量 / 二元运算(+ - * /)，优先级 * / 高于 + -。
+// 这是"源码 → token(lexer) → AST(parser) → 值(eval)"闭环的第三段。
+
+// ── token 类型判断（token 是 {type, lexeme, line}）──
+fun isNum(t)  { return t["type"] == "NUMBER"; }
+fun isVar(t)  { return t["type"] == "IDENT"; }
+fun isOp(t)   { return t["type"] == "PLUS" || t["type"] == "MINUS" || t["type"] == "STAR" || t["type"] == "SLASH"; }
+fun isMulOp(t){ return t["type"] == "STAR" || t["type"] == "SLASH"; }
+fun isAddOp(t){ return t["type"] == "PLUS" || t["type"] == "MINUS"; }
+
+// ── 数字 token → 数值（lexeme 是字符串，str 的逆 num()）──
+fun toNum(t) {
+  return num(t["lexeme"]);
+}
+
+// ── 解析器：持有 tokens + 当前位置 i → 返回字典结果 { ast, cur } ──
+// 免语言函数一次只回一个值，这里用字典 { ast, cur } 打包"返回值 + 新的位置"
+
+// 因子：数字 或 变量
+fun parseFactor(toks, i) {
+  let t = toks[i];
+  done isNum(t) {
+    return { "ast": { "kind": "num", "value": toNum(t) }, "cur": i + 1 };
+  }
+  done isVar(t) {
+    return { "ast": { "kind": "var", "name": t["lexeme"] }, "cur": i + 1 };
+  }
+  done t["type"] == "LPAREN" {
+    // ( 表达式 )：递归解析括号内，吃掉右括号
+    let inner = parseAddSub(toks, i + 1);
+    return { "ast": inner["ast"], "cur": inner["cur"] + 1 };
+  }
+  print "parseFactor: 不认识 token " + t["lexeme"] + " (" + t["type"] + ")";
+  return { "ast": { "kind": "num", "value": 0 }, "cur": i + 1 };
+}
+
+// 乘法项：因子 ( * 因子 | / 因子 )*
+fun parseMulDiv(toks, i) {
+  let left = parseFactor(toks, i);
+  let cur = left["cur"];
+  let ast = left["ast"];
+  while (cur < len(toks) && isMulOp(toks[cur])) {
+    let op = toks[cur];
+    let right = parseFactor(toks, cur + 1);
+    ast = { "kind": "bin", "op": op["lexeme"], "left": ast, "right": right["ast"] };
+    cur = right["cur"];
+  }
+  return { "ast": ast, "cur": cur };
+}
+
+// 加减项：乘法项 ( + 乘法项 | - 乘法项 )*   ← 也处理括号内表达式
+fun parseAddSub(toks, i) {
+  let left = parseMulDiv(toks, i);
+  let cur = left["cur"];
+  let ast = left["ast"];
+  while (cur < len(toks) && isAddOp(toks[cur])) {
+    let op = toks[cur];
+    let right = parseMulDiv(toks, cur + 1);
+    ast = { "kind": "bin", "op": op["lexeme"], "left": ast, "right": right["ast"] };
+    cur = right["cur"];
+  }
+  return { "ast": ast, "cur": cur };
+}
+
+// ── 自测：解析一段 token（手动造，对应 "1 + 2 * 3"）──
+// 实际操作应接 self_lexer 的输出；这里先手写 token 验证 parser 本身
+let toks = [
+  { "type": "NUMBER", "lexeme": "1", "line": 1 },
+  { "type": "PLUS",   "lexeme": "+", "line": 1 },
+  { "type": "NUMBER", "lexeme": "2", "line": 1 },
+  { "type": "STAR",   "lexeme": "*", "line": 1 },
+  { "type": "NUMBER", "lexeme": "3", "line": 1 }
+];
+let r = parseAddSub(toks, 0);
+print "AST 根: " + r["ast"]["kind"];
+print "AST op: " + r["ast"]["op"];
+print "AST 左: " + str(r["ast"]["left"]["value"]);
+print "AST 右: " + r["ast"]["right"]["kind"] + "(" + r["ast"]["right"]["op"] + ")";
