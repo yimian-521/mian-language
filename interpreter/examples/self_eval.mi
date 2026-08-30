@@ -1,0 +1,98 @@
+// ── 免语言自举第二块砖：用免语言写的最小求值器 ──
+// 意义：语言第一次"解释"自己——不靠宿主，用自己定义的一切去求值。
+// 能力：数字字面量 / 二元运算(+ - * /) / 变量读取 / 函数(参数+调用)。
+// 环境是字典：读用 get，参数绑定用 ref+write 建键（可变定位原语）。
+// 节点用字典表示；body 循环求值内联（避免函数互相引用 + 闭包快照问题）。
+
+// ── 求值主函数：节点 → 值 ──
+fun evalMian(node, env) {
+  let kind = node["kind"];
+
+  // 数字字面量：{ kind:"num", value: 42 }
+  done kind == "num" { return node["value"]; }
+
+  // 二元运算：{ kind:"bin", op:"+", left:..., right:... }
+  done kind == "bin" {
+    let l = evalMian(node["left"], env);
+    let r = evalMian(node["right"], env);
+    let op = node["op"];
+    done op == "+" { return l + r; }
+    done op == "-" { return l - r; }
+    done op == "*" { return l * r; }
+    done op == "/" { return l / r; }
+    print "未知运算符 " + op;
+    return 0;
+  }
+
+  // 变量读取：{ kind:"var", name:"x" }
+  done kind == "var" {
+    return get(env, node["name"], 0);
+  }
+
+  // 函数调用：{ kind:"call", params, args, body } —— 参数绑定到子环境
+  done kind == "call" {
+    let child = {};
+    let i = 0;
+    while (i < len(node["params"])) {
+      let pn = node["params"][i];
+      let pv = evalMian(node["args"][i], env);
+      let slot = ref child[pn];
+      write(slot, pv);
+      i = i + 1;
+    }
+    // 求值 body（内联循环，避免 evalBody 与 evalMian 互相引用）
+    let j = 0;
+    let last = 0;
+    while (j < len(node["body"])) {
+      last = evalMian(node["body"][j], child);
+      j = j + 1;
+    }
+    return last;
+  }
+
+  print "未知节点类型 " + kind;
+  return 0;
+}
+
+// ── 自测 1：1 + 2 * 3 = 7 ──
+let ast1 = {
+  "kind": "bin",
+  "op": "+",
+  "left": { "kind": "num", "value": 1 },
+  "right": {
+    "kind": "bin",
+    "op": "*",
+    "left": { "kind": "num", "value": 2 },
+    "right": { "kind": "num", "value": 3 }
+  }
+};
+print "1 + 2 * 3 = " + str(evalMian(ast1, {}));
+
+// ── 自测 2：add(10, 5)，参数绑定 p0,p1 ──
+let addCall = {
+  "kind": "call",
+  "params": ["p0", "p1"],
+  "args": [
+    { "kind": "num", "value": 10 },
+    { "kind": "num", "value": 5 }
+  ],
+  "body": [
+    { "kind": "bin", "op": "+",
+      "left": { "kind": "var", "name": "p0" },
+      "right": { "kind": "var", "name": "p1" } }
+  ]
+};
+print "add(10, 5) = " + str(evalMian(addCall, {}));
+
+// ── 自测 3：double(add(3, 4)) —— 嵌套调用 ──
+let doubleCall = {
+  "kind": "call",
+  "params": ["x"],
+  "args": [ addCall ],
+  "body": [
+    { "kind": "bin", "op": "*",
+      "left": { "kind": "var", "name": "x" },
+      "right": { "kind": "num", "value": 2 } }
+  ]
+};
+print "double(add(3, 4)) = " + str(evalMian(doubleCall, {}));
