@@ -9,7 +9,7 @@ const TOKEN = {
   IDENT: "IDENT",
   // 关键字
   LET: "LET", PRINT: "PRINT", IF: "IF", THEN: "THEN", ELSE: "ELSE", DONE: "DONE", RETURN: "RETURN", FUN: "FUN",
-  TRUE: "TRUE", FALSE: "FALSE", WHILE: "WHILE", FOR: "FOR", IMPORT: "IMPORT", REF: "REF",
+  TRUE: "TRUE", FALSE: "FALSE", WHILE: "WHILE", FOR: "FOR", IMPORT: "IMPORT", REF: "REF", BREAK: "BREAK", CONTINUE: "CONTINUE",
   // 数组
   LBRACKET: "[", RBRACKET: "]",
   // 标点（边界符必须发声）
@@ -24,12 +24,14 @@ const TOKEN = {
   BANG: "!", BANG_EQ: "!=", BANG_EQ_EQ: "!==",
   AMPS: "&&", PIPES: "||",   // 逻辑与/或（短路）
   LT: "<", LT_EQ: "<=", GT: ">", GT_EQ: ">=",
+  QUESTION: "?",  // 三元运算符 条件 ? 真 : 假
   EOF: "EOF"
 };
 
 const KEYWORDS = new Map([
   ["let", "LET"], ["print", "PRINT"], ["if", "IF"], ["then", "THEN"], ["else", "ELSE"], ["done", "DONE"], ["return", "RETURN"], ["fun", "FUN"],
-  ["true", "TRUE"], ["false", "FALSE"], ["while", "WHILE"], ["for", "FOR"], ["import", "IMPORT"], ["ref", "REF"]
+  ["true", "TRUE"], ["false", "FALSE"], ["while", "WHILE"], ["for", "FOR"], ["import", "IMPORT"], ["ref", "REF"],
+  ["break", "BREAK"], ["continue", "CONTINUE"]
 ]);
 
 class Token {
@@ -143,6 +145,7 @@ class Lexer {
         break;
       case "<": this.addToken(this.match("=") ? TOKEN.LT_EQ : TOKEN.LT); break;
       case ">": this.addToken(this.match("=") ? TOKEN.GT_EQ : TOKEN.GT); break;
+      case "?": this.addToken(TOKEN.QUESTION); break;
       case " ": case "\r": case "\t": break; // 无意义空白
       case "\n": break; // 换行在 advance 里已计数
       case '"': this.scanString(); break;
