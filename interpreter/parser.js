@@ -143,8 +143,24 @@ class Parser {
     if (this.match(TOKEN.DONE)) return this.doneStatement();
     if (this.match(TOKEN.WHILE)) return this.whileStatement();
     if (this.match(TOKEN.FOR)) return this.forStatement();
+    if (this.match(TOKEN.BREAK)) return this.breakStatement();
+    if (this.match(TOKEN.CONTINUE)) return this.continueStatement();
     if (this.match(TOKEN.LBRACE)) return { kind: "block", statements: this.block() };
     return this.expressionStatement();
+  }
+
+  // break：跳出当前循环（循环截断信号）
+  breakStatement() {
+    const tok = this.previous();
+    this.consume(TOKEN.SEMI, "break 语句结尾要写 ;");
+    return { kind: "break", line: tok.line };
+  }
+
+  // continue：跳到当前循环的下一轮（循环截断信号）
+  continueStatement() {
+    const tok = this.previous();
+    this.consume(TOKEN.SEMI, "continue 语句结尾要写 ;");
+    return { kind: "continue", line: tok.line };
   }
 
   // if 条件 { 走这支 } else { 走另一支 } —— 或许态：两个可能世界都摆在明面上
@@ -245,12 +261,20 @@ class Parser {
   }
 
   // 赋值 = 右结合、优先级最低（for 的 increment 和 while 里的计数都要它）
+  // 三元 = 条件 ? 真 : 假（右结合，优先级在赋值之上）
   assignment() {
     const expr = this.equality();
+    if (this.match(TOKEN.QUESTION)) {
+      const q = this.previous();
+      const thenExpr = this.expression();   // 真分支（任意表达式）
+      this.consume(TOKEN.COLON, "三元运算符 ? 后面要 :");
+      const elseExpr = this.assignment();   // 假分支（右结合）
+      return { kind: "ternary", condition: expr, thenBranch: thenExpr, elseBranch: elseExpr, line: q.line };
+    }
     if (this.match(TOKEN.EQ)) {
       const eq = this.previous();
       const value = this.assignment();   // 右结合：a = b = c
-      if (expr.kind !== "variable" && expr.kind !== "call") {
+      if (expr.kind !== "variable" && expr.kind !== "call" && expr.kind !== "index") {
         throw this.error(eq, "赋值目标必须是个变量");
       }
       return { kind: "assign", name: expr, value, line: eq.line };
