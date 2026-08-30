@@ -3,7 +3,13 @@
 
 fun evalMian(node, env) {
   let kind = node["kind"];
+  // 数字字面量
   done kind == "num" { return node["value"]; }
+  // 字符串字面量
+  done kind == "str" { return node["value"]; }
+  // 布尔字面量
+  done kind == "bool" { return node["value"]; }
+  // 二元运算（含比较）
   done kind == "bin" {
     let l = evalMian(node["left"], env);
     let r = evalMian(node["right"], env);
@@ -12,14 +18,87 @@ fun evalMian(node, env) {
     done op == "-" { return l - r; }
     done op == "*" { return l * r; }
     done op == "/" { return l / r; }
+    done op == "==" { return l == r; }
+    done op == "===" { return l == r; }
+    done op == "!=" { return l != r; }
+    done op == ">" { return l > r; }
+    done op == "<" { return l < r; }
+    done op == ">=" { return l >= r; }
+    done op == "<=" { return l <= r; }
     return 0;
   }
+  // 变量读取
   done kind == "var" { return get(env, node["name"], 0); }
+  // let 声明：{ kind:"let", name, value } → 存环境
+  done kind == "let" {
+    let v = evalMian(node["value"], env);
+    let slot = ref env[node["name"]];
+    write(slot, v);
+    return v;
+  }
+  // 赋值：{ kind:"assign", name, value } → 改环境
+  done kind == "assign" {
+    let v = evalMian(node["value"], env);
+    let slot = ref env[node["name"]];
+    write(slot, v);
+    return v;
+  }
+  // print：{ kind:"print", value } → 输出并返回（这里直接返回求值结果，输出由宿主/主程序收集）
+  done kind == "print" {
+    return evalMian(node["value"], env);
+  }
+  // if/else：{ kind:"if", condition, then, else }
+  done kind == "if" {
+    let c = evalMian(node["condition"], env);
+    if (c) {
+      return evalMian(node["then"], env);
+    } else {
+      return evalMian(node["else"], env);
+    }
+  }
+  // done 定性：{ kind:"done", condition, body } —— 只执行，返回最后一条
+  done kind == "done" {
+    let c = evalMian(node["condition"], env);
+    done c != false {   // 条件求值返回布尔：false 才不执行（不能用 != 0，严格类型）
+      let j = 0;
+      let last = 0;
+      while (j < len(node["body"])) {
+        last = evalMian(node["body"][j], env);
+        j = j + 1;
+      }
+      return last;
+    }
+    return 0;
+  }
+  // while 循环：{ kind:"while", condition, body }
+  done kind == "while" {
+    let last = 0;
+    let c = evalMian(node["condition"], env);
+    while (c != false) {   // 条件求值返回布尔：false 才停（不能用 != 0，布尔vs数字严格类型恒真）
+      // body 循环内联（避免 evalBody 与 evalMian 互相引用导致的闭包快照问题）
+      let j = 0;
+      while (j < len(node["body"])) {
+        last = evalMian(node["body"][j], env);
+        j = j + 1;
+      }
+      c = evalMian(node["condition"], env);
+    }
+    return last;
+  }
+  // 函数定义：fun name(params){body} → 存入环境
+  done kind == "fun" {
+    let fn = { "params": node["params"], "body": node["body"] };
+    let slot = ref env[node["name"]];
+    write(slot, fn);
+    return node["name"];
+  }
+  // 函数调用：{ kind:"call", name, args } → 按名字从环境查函数体
   done kind == "call" {
+    let fn = env[node["name"]];
     let child = {};
     let i = 0;
-    while (i < len(node["params"])) {
-      let pn = node["params"][i];
+    while (i < len(fn["params"])) {
+      let pn = fn["params"][i];
       let pv = evalMian(node["args"][i], env);
       let slot = ref child[pn];
       write(slot, pv);
@@ -27,11 +106,22 @@ fun evalMian(node, env) {
     }
     let j = 0;
     let last = 0;
-    while (j < len(node["body"])) {
-      last = evalMian(node["body"][j], child);
+    while (j < len(fn["body"])) {
+      last = evalMian(fn["body"][j], child);
       j = j + 1;
     }
     return last;
   }
   return 0;
+}
+
+// 求值语句列表（body 是数组），返回最后一条
+fun evalBody(body, env) {
+  let i = 0;
+  let last = 0;
+  while (i < len(body)) {
+    last = evalMian(body[i], env);
+    i = i + 1;
+  }
+  return last;
 }
