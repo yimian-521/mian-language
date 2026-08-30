@@ -501,6 +501,26 @@ SUITES.push({ name: "ref", cases: [
       const r = await run('let d = {"a": 1}; let r = ref d["b"]; print read(r);');
       assertEq(!!r.runtimeError, true, "read 不存在的键必须报悬垂，不静默");
     }),
+    t("break 跳出循环", async () => {
+      const r = await run("let i = 0; while (i < 10) { if i == 3 { break; } i = i + 1; } print i;");
+      assertEq(r.out.join("|"), "3");
+    }),
+    t("continue 跳过本轮", async () => {
+      const r = await run("let i = 0; let s = 0; while (i < 5) { i = i + 1; if i == 3 { continue; } s = s + i; } print s;");
+      assertEq(r.out.join("|"), "12");
+    }),
+    t("动态加键 d[k]=v", async () => {
+      const r = await run('let d = {"a": 1}; d["b"] = 2; print d["a"]; print d["b"];');
+      assertEq(r.out.join("|"), "1|2");
+    }),
+    t("三元运算符", async () => {
+      const r = await run("let x = 5; let r = x > 3 ? 100 : 200; print r;");
+      assertEq(r.out.join("|"), "100");
+    }),
+    t("函数互引 isEven/isOdd", async () => {
+      const r = await run("fun isEven(n) { done n == 0 { return true; } return isOdd(n - 1); } fun isOdd(n) { done n == 0 { return false; } return isEven(n - 1); } print isEven(4); print isOdd(3);");
+      assertEq(r.out.join("|"), "true|true");
+    }),
   ] });
 
 function stressSuites(scale) {
