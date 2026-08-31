@@ -27,6 +27,34 @@ fun evalMian(node, env) {
     done op == "<=" { return l <= r; }
     return 0;
   }
+  // 数组字面量：{ kind:"array", items } → 逐项求值返回数组
+  done kind == "array" {
+    let out = [];
+    let i = 0;
+    while (i < len(node["items"])) {
+      out = append(out, evalMian(node["items"][i], env));
+      i = i + 1;
+    }
+    return out;
+  }
+  // 字典字面量：{ kind:"dict", entries:[{key,value}] } → 建字典
+  done kind == "dict" {
+    let d = {};
+    let i = 0;
+    while (i < len(node["entries"])) {
+      let e = node["entries"][i];
+      let slot = ref d[e["key"]];
+      write(slot, evalMian(e["value"], env));
+      i = i + 1;
+    }
+    return d;
+  }
+  // 索引访问：{ kind:"index", callee, index } → 数组/字典取元素
+  done kind == "index" {
+    let target = evalMian(node["callee"], env);
+    let idx = evalMian(node["index"], env);
+    return target[idx];
+  }
   // 变量读取
   done kind == "var" { return get(env, node["name"], 0); }
   // let 声明：{ kind:"let", name, value } → 存环境
@@ -108,9 +136,21 @@ fun evalMian(node, env) {
     let last = 0;
     while (j < len(fn["body"])) {
       last = evalMian(fn["body"][j], child);
+      // return 截断信号：先判断 last 是字典（type=="object"）再 get，避免对数字 get 报错
+      done type(last) == "object" {
+        let rv = get(last, "__ret__", 0);
+        done rv != 0 {
+          return rv;
+        }
+      }
       j = j + 1;
     }
     return last;
+  }
+  // return 语句：{ kind:"return", value } → 返回 { __ret__: 值 } 作为截断信号
+  done kind == "return" {
+    let v = evalMian(node["value"], env);
+    return { "__ret__": v };
   }
   return 0;
 }
