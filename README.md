@@ -14,7 +14,8 @@ cd interpreter
 node mian.js examples/key_audit.mi     # 跑一个示例
 node mian.js your_file.mi              # 跑你的 .mi 文件
 node mian.js your_file.mi --ledger     # 开五段账本，看每个值的一生
-node mian.js test                      # 一键验收（65 测试 + 双身体对拍 + 三身体对拍 + 三件套 + 边界 + import）
+node mian.js your_file.mi --trace      # 调试：摊开"执行器每一步把输入当成了什么"
+node mian.js test                      # 一键验收（主测试 82 + 三身体对拍 + C++ 对拍 + 并发 + 三件套 + 边界 + import）
 ```
 
 ## 安装为命令
@@ -65,6 +66,29 @@ print double(21);                 // 42
 | C++ 原生执行器 | `../native/mian_native.cpp` | 零 Node 真身（/sdcard 无执行位，编译到 /tmp 跑） |
 
 `mian test` 一条命令验三具身体没分叉。
+
+## 执行器理解自己（--trace）
+
+传统执行器（C/Go 编译出的机器码）是"哑执行器"——跑完就完了，它自己不知道跑的是什么。免语言执行器可以 `--trace` 边跑边懂，摊开"每一步把输入当成了什么"：
+
+- **① lexer**：源码被切成了什么 token 流——`=` 是不是被当错成空 token，一眼能看穿
+- **② parser**：token 被组装成了什么 AST——`x + 3` 是不是真当成 `(+ (var x) (3))`
+- **③ eval 执行轨迹**：每个节点被求值成了什么值，含强度（if 走哪支、函数怎么调、数组/字典/索引怎么取）
+
+不改变正常执行路径，专为"验明正身"设计——防止"看起来对、实际被误解成另一种东西"。
+
+## 自举（语言自己吃自己）
+
+免语言的目标是**语言自己写自己**。自举三件套 `boot_lex.mi` → `boot_parse.mi` → `boot_eval.mi` 用免语言自己实现 lexer / parser / eval，由 `self_boot.mi` 组装——一段 .mi 源码进去，经过三段独立模块（像 C 的编译单元 + 头文件、Go 的 package + import）一路自举解释到底：
+
+```text
+源码 → lexMian(token) → parseExpr(AST) → evalMian(值)
+```
+
+- 表达式：算术 / 比较 / 字符串 / 布尔 / 函数调用 / 变量
+- 语句：`let` / `print` / `fun` 定义 / `while` / `if/else` / 赋值 / `return`（真截断）
+- 集合：数组字面量 / 字典字面量 / 索引访问
+- 验证：`self_boot.mi` 全通——算术 7 / 函数 15 / let+print 8 / while 求和 10 / if 100 / return 99 / 数组索引 / 字典索引
 
 ## 原创概念
 
