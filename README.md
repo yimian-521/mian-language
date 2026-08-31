@@ -55,17 +55,18 @@ import "math_utils.mi";
 print double(21);                 // 42
 ```
 
-## 三身体（行为一致性铁律）
+## 三身体 + 自举（行为一致性铁律）
 
-同一份 `.mi`，三具身体输出必须逐字一致：
+同一份 `.mi`，四具身体输出必须逐字一致：
 
 | 身体 | 文件 | 说明 |
 |---|---|---|
 | JS 树游解释器 | `evaluator.js` | 快速工作台 |
 | JS 字节码 VM | `compiler.js` + `vm.js` | 对拍镜 |
 | C++ 原生执行器 | `../native/mian_native.cpp` | 零 Node 真身（/sdcard 无执行位，编译到 /tmp 跑） |
+| **免语言自举解释器** | `examples/boot_lex.mi` + `boot_parse.mi` + `boot_eval.mi` | 语言自己写自己的解释器，由 `self_boot.mi` 组装 |
 
-`mian test` 一条命令验三具身体没分叉。
+`mian test` 一条命令验前三具宿主身体没分叉；`self_boot.mi` 跑通自举闭环——算术 7 / 函数 15 / let+print 8 / while 求和 10 / if 100 / return 99 / 数组索引 / 字典索引。
 
 ## 执行器理解自己（--trace）
 
