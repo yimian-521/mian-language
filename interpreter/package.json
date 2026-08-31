@@ -1,6 +1,6 @@
 {
   "name": "mian-language",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "免语言（Mian）—— Python 级写感 + C 级性能的原创编程语言。手写解释器 + 字节码 VM + C++ 原生执行器三身体，值强度 / 五段账本 / done 定性态原创概念，支持并发(spawn)、指针索引(ref/read/write) 与自举。",
   "main": "mian.js",
   "bin": {
