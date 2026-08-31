@@ -1,0 +1,1 @@
+import "boot_lex.mi"; import "boot_parse.mi"; let source = "while (i < 3) { i = i + 1; }"; let toks = lexMian(source); print "tokens=" + str(len(toks)); let stmts = parseProgram(toks, 0); print "stmt=" + str(len(stmts));

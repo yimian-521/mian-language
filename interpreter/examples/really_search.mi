@@ -1,0 +1,6 @@
+// ── 免语言真搜索：调用原生 web 函数搜"hello world" ──
+// 这是免语言第一次用原生手做真实网络请求。
+// 与 lite 同款场景：一个引擎、一次搜索、能出结果就是成功。
+
+let result = web("hello world");
+print result;

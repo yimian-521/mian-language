@@ -1,0 +1,1 @@
+import "boot_lex.mi"; let source = "while (i < 3) { print i; }"; print "pre"; let toks = lexMian(source); print "tok=" + str(len(toks));

@@ -1,0 +1,1 @@
+import "boot_lex.mi"; let source = "= "; let toks = lexMian(source); print "len=" + str(len(toks));

@@ -1,0 +1,44 @@
+// ── 免语言版多引擎搜索（转译自多引擎搜索_lite.js） ──
+// 哲学落地：语言下命令，机器回禀。
+// 语言负责：选引擎、定性裁决、下搜索命令、验收结果。
+// 机器负责（宿主原生手）：真正的网络请求、JSON 解析——绝不插嘴。
+
+// 问-答契约第一步：挨个引擎问"有钥匙吗"——机器只回 true/false，不能替语言做决定
+let hasTavily = engineReady("tavily");
+let hasGoogle = engineReady("google");
+let hasSerpapi = engineReady("serpapi");
+let hasBocha = engineReady("bocha");
+let hasGithub = engineReady("github");
+
+// 语言自己的决策函数：lite 的核心——能搜到就是成功
+fun pickEngine() {
+  done hasTavily { return "tavily"; }
+  done hasGoogle { return "google"; }
+  done hasSerpapi { return "serpapi"; }
+  done hasBocha { return "bocha"; }
+  done hasGithub { return "github"; }
+  return "none";
+}
+
+// 体检报告（key 追踪的免语言脸）
+print "引擎体检：";
+done hasTavily { print "tavily ✓"; }
+done hasGoogle { print "google ✓"; }
+done hasSerpapi { print "serpapi ✓"; }
+done hasBocha { print "bocha ✓"; }
+done hasGithub { print "github ✓"; }
+
+// 语言裁决选择引擎——done 定性，不是 if 猜测
+let engine = pickEngine();
+print "语言裁决：使用 " + engine;
+
+// 语言下搜索命令；机器服从并回禀结果
+done engine != "none" {
+  let result = search("hello world");
+  print "搜索结果：" + result;
+}
+
+// 控制权验收：机器没钥匙时，语言说没有就是没有——不吞、不装
+done engine == "none" {
+  print "无可用引擎：语言如实报告，机器无权补一个。";
+}

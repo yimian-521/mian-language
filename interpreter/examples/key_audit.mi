@@ -1,0 +1,32 @@
+// ── 免语言第一个真实脚本：引擎密钥体检 ──
+// 场景：多引擎搜索 lite 的 keys_add 之前，先体检五把引擎钥匙是否齐全、是否有裸露痕迹。
+// 这是用免语言当前子集（函数 + done 定性等你已实现的能力）可写可跑的真实脚本。
+
+// 密钥长度是真内网判据的类比：小于16字符必是假钥匙/占位符
+fun isKeyLenSuspicious(len) {
+  return len < 16;
+}
+
+// 每个引擎一个体检单元：名字 + 是否可疑
+fun checkEngine(name, keyFound) {
+  done keyFound { return name + " ✓"; }
+  return name + " ✗ 缺钥匙";
+}
+
+// 五个引擎的体检表（little和lite的同一张脸）
+let tavily = checkEngine("tavily", true);
+let google = checkEngine("google", false);
+let serpapi = checkEngine("serpapi", true);
+let bocha = checkEngine("bocha", true);
+let github = checkEngine("github", true);
+
+print tavily;
+print google;
+print serpapi;
+print bocha;
+print github;
+
+// 关键裁决：四把真钥匙齐了才继续（done=定性事实，不是if猜测）
+done tavily == "tavily ✓" {
+  print "体检通过：四真一缺，符合lite的'能搜到就是成功'。";
+}

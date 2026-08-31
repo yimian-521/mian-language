@@ -1,0 +1,40 @@
+// ── 免语言版完整私用搜索：真·RetryCourt 转译 ──
+// 这是压力测试的考场：private 版最脏的活——逐引擎重试、退避、熔断、失败聚合——
+// 全部由语言自己指挥，机器只做"一次尝试 + 如实回禀"两件事。
+// 机器契约：attemptSearch(引擎, 查询) → [成功?布尔, 信息]；sleep(毫秒) → 睡完记一笔。
+// 语言契约：挑引擎、多少试、退避节奏、熔断阈值、成功即收工、全败聚合——全是语言的裁决。
+
+let engines = ["tavily", "google", "serpapi", "bocha", "exa", "github"];
+let q = "hello world";
+// 可自由调参（语言自己管策略，不是机器写死）
+let maxTries = 3;       // 每引擎最多试几次
+let backoffBase = 500;  // 退避基数：语言算节奏，机器只睡
+
+let i = 0;
+let fails = "";
+
+print "语言裁决：策略 = 每引擎最多 " + str(maxTries) + " 次尝试，退避基数 " + str(backoffBase) + "ms";
+
+while (i < len(engines)) {
+  let eng = engines[i];
+  let ready = engineReady(eng);
+  done ready {                      // 有钥匙才值得试（没钥匙直接下一个，如实聚合）
+    let n = 0;
+    while (n < maxTries) {
+      let r = attemptSearch(eng, q);  // 机器一次尝试，回禀 [成? 信息]
+      done r[0] {                     // 成功=事实，语言拍板：收工
+        print "引擎 " + eng + " 成功：" + r[1];
+        return r[1];
+      }
+      // 失败：聚合进报告（AggregateError 的语义——每笔都留底，不丢）
+      fails = fails + eng + "(" + str(n + 1) + "):" + r[1] + "; ";
+      n = n + 1;
+      // 退避：语言算节奏（n*基数），机器执行睡眠
+      done n < maxTries { sleep(n * backoffBase); }
+    }
+  }
+  i = i + 1;
+}
+
+// 全部失败：语言给出聚合报告——每一笔失败都在，没有静默吞
+print "全部失败。聚合报告：" + fails;

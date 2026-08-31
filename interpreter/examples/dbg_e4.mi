@@ -1,0 +1,1 @@
+import "boot_lex.mi"; import "boot_parse.mi"; let source = "i < 3"; let toks = lexMian(source); let r = parseExpr(toks, 0, 1); print "kind=" + r["ast"]["kind"];

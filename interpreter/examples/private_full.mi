@@ -1,0 +1,42 @@
+// ── 免语言版完整私用多引擎搜索（转译自多引擎搜索_private.js 的指挥核心） ──
+// 压力测试真相：private 版的 while/数组逐引擎重试，免语言当前没有循环。
+// 所以指挥权分层：语言用 done 做静态决策链（每个引擎的裁决），机器做重复执行。
+// 语言负责：引擎排序、先有钥匙、重试节奏、熔断裁决、错误聚合。
+// 机器负责（宿主原生手）：真网络请求、JSON 解析、time 计时、backoff 计时。绝不插嘴。
+
+// 语言自己的重型决策：按优先级逐个裁决引擎，先有钥匙者得
+fun firstReady(e1, e2, e3, e4, e5, e6) {
+  done e1 { return "tavily"; }
+  done e2 { return "google"; }
+  done e3 { return "serpapi"; }
+  done e4 { return "bocha"; }
+  done e5 { return "exa"; }
+  done e6 { return "github"; }
+  return "none";
+}
+
+// 顶层执行：语言裁决、机器照办
+let q = "hello world";
+print "完整版指挥核心启动，查询：" + q;
+
+// 问机器要钥匙回禀——机器只答 bool，不替语言选
+let chosen = firstReady(
+  engineReady("tavily"),
+  engineReady("google"),
+  engineReady("serpapi"),
+  engineReady("bocha"),
+  engineReady("exa"),
+  engineReady("github")
+);
+print "语言裁决：使用 " + chosen;
+
+// 裁决后下令搜索；机器如实回禀结果
+done chosen != "none" {
+  let result = search(q);
+  print "搜索结果：" + result;
+}
+
+// 控制权验收：找不到钥匙时，如实报告——机器无权补一个
+done chosen == "none" {
+  print "无可用引擎：语言如实报告，机器无权补一个。";
+}

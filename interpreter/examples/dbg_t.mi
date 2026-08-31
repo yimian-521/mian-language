@@ -1,0 +1,1 @@
+import "boot_lex.mi"; let source = "while (i < 3) { }"; let toks = lexMian(source); let k = 0; while (k < len(toks)) { print k + ":" + toks[k]["type"] + "( + toks[k][lexeme] + )"; k = k + 1; }

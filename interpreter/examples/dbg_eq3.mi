@@ -1,0 +1,1 @@
+import "boot_lex.mi"; let source = "= "; let toks = lexMian(source); let t = toks[0]; print "type=[" + t["type"] + "]";
