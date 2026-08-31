@@ -98,3 +98,31 @@ while (i7 < len(stmts7)) {
   i7 = i7 + 1;
 }
 print "自举 if(x>3): " + str(result7);
+
+// ── 自举 return 提前截断：fun f() { return 99; return 88; } → 应返回 99 ──
+let source8 = "fun f() { return 99; return 88; } f()";
+let toks8 = lexMian(source8);
+let stmts8 = parseProgram(toks8, 0);
+let env8 = {};
+let i8 = 0;
+let result8 = 0;
+while (i8 < len(stmts8)) {
+  result8 = evalMian(stmts8[i8], env8);
+  i8 = i8 + 1;
+}
+print "自举 return 截断: " + str(result8);
+
+// ── 自举数组字面量 + 索引：[1, 2, 3][0] → 1 ──
+let source9 = "[1, 2, 3][0]";
+let toks9 = lexMian(source9);
+let ast9 = parseExpr(toks9, 0, 1)["ast"];
+let val9 = evalMian(ast9, {});
+print "自举数组索引: " + str(val9);
+
+// ── 自举字典字面量 + 索引：用 chr(34) 构建引号 ──
+let q = chr(34);
+let source10 = "{" + q + "a" + q + ": 1, " + q + "b" + q + ": 2}[" + q + "a" + q + "]";
+let toks10 = lexMian(source10);
+let ast10 = parseExpr(toks10, 0, 1)["ast"];
+let val10 = evalMian(ast10, {});
+print "自举字典索引: " + str(val10);
