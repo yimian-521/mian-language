@@ -12,6 +12,7 @@ const arg1 = process.argv[2];
 const withLedger = process.argv.includes("--ledger");
 const verbose = process.argv.includes("--verbose");
 const stress = process.argv.includes("--stress");
+const trace = process.argv.includes("--trace");   // 调试模式：摊开"每一步它把输入当成了什么"
 const thrArg = process.argv.find(a => a.startsWith("--threshold=")) || "";
 
 // ── --version / --help ──
@@ -88,6 +89,16 @@ if (lexErrors.length || parseErrors.length) {
   process.exit(1);
 }
 
+// ── 调试模式 --trace：摊开"它把输入当成了什么" ──
+if (trace) {
+  console.log("=== ① lexer 把源码当成了什么（token 流）===");
+  for (const t of tokens) console.log(`  ${t.type} '${t.lexeme}' @${t.line}:${t.col}`);
+  console.log("\n=== ② parser 把 token 当成了什么（AST）===");
+  const { printAst } = require("./parser");
+  for (const s of statements) console.log("  " + printAst(s).trim());
+  console.log("");
+}
+
 // ── CLI 默认 import 安全 loader（与 C++ 原生执行器对齐：同目录 .mi + 循环防护）──
 const path = require("path");
 const loadedImports = new Set();
@@ -109,7 +120,7 @@ function cliParseSource(source) {
   return statements;
 }
 
-const ev = new Evaluator({ ledger: withLedger, importLoader: cliImportLoader, parseSource: cliParseSource });
+const ev = new Evaluator({ ledger: withLedger, importLoader: cliImportLoader, parseSource: cliParseSource, trace: trace || null });
 (async () => {
   try {
     await ev.interpret(statements);   // interpret 现在是 async
