@@ -58,6 +58,44 @@ fun parseExpr(toks, i, minPrec) {
       }
       atom = { "kind": "call", "name": name, "args": args };
       acur = cur + 1;   // 跳过 )
+    } else if (t["type"] == "LBRACKET") {
+      // 数组字面量：[ e1, e2, ... ]
+      let items = [];
+      let cur = i + 1;   // 跳过 [
+      if (cur < len(toks) && toks[cur]["type"] != "RBRACKET") {
+        let first = parseExpr(toks, cur, 1);
+        items = append(items, first["ast"]);
+        cur = first["cur"];
+        while (cur < len(toks) && toks[cur]["type"] == "COMMA") {
+          let nxt = parseExpr(toks, cur + 1, 1);
+          items = append(items, nxt["ast"]);
+          cur = nxt["cur"];
+        }
+      }
+      atom = { "kind": "array", "items": items };
+      acur = cur + 1;   // 跳过 ]
+    } else if (t["type"] == "LBRACE") {
+      // 字典字面量：{ "key": value, ... }
+      let entries = [];
+      let cur = i + 1;   // 跳过 {
+      while (cur < len(toks) && toks[cur]["type"] != "RBRACE") {
+        // 键：字符串或标识符
+        let key = "";
+        if (toks[cur]["type"] == "STRING") {
+          let lit = toks[cur]["lexeme"];
+          key = sub(lit, 1, len(lit) - 1);
+        } else {
+          key = toks[cur]["lexeme"];
+        }
+        cur = cur + 1;   // 跳到 :
+        if (cur < len(toks) && toks[cur]["type"] == "COLON") { cur = cur + 1; }
+        let v = parseExpr(toks, cur, 1);
+        entries = append(entries, { "key": key, "value": v["ast"] });
+        cur = v["cur"];
+        if (cur < len(toks) && toks[cur]["type"] == "COMMA") { cur = cur + 1; }
+      }
+      atom = { "kind": "dict", "entries": entries };
+      acur = cur + 1;   // 跳过 }
     } else if (t["type"] == "IDENT") {
       atom = { "kind": "var", "name": t["lexeme"] };
       acur = i + 1;
@@ -70,6 +108,12 @@ fun parseExpr(toks, i, minPrec) {
 
   let ast = atom;
   let cur = acur;
+  // 后缀索引：atom[索引] → { kind:"index", callee, index }
+  while (cur < len(toks) && toks[cur]["type"] == "LBRACKET") {
+    let idx = parseExpr(toks, cur + 1, 1);
+    ast = { "kind": "index", "callee": ast, "index": idx["ast"] };
+    cur = idx["cur"] + 1;   // 跳过 ]
+  }
   // 赋值：var = value（右结合）——只有 atom 是变量才能赋值
   if (atom["kind"] == "var" && cur < len(toks) && toks[cur]["type"] == "EQ") {
     let v = parseExpr(toks, cur + 1, 1);
@@ -115,6 +159,12 @@ fun parseProgram(toks, i) {
         // body 里的表达式（简化：每个用 ; 或 } 分隔，这里直接 parseExpr 到下一个边界）
         if (toks[b]["type"] == "SEMI") {
           b = b + 1;
+        } else if (toks[b]["type"] == "RETURN") {
+          // return 语句：return value; → { kind:"return", value }
+          let rv = parseExpr(toks, b + 1, 1);
+          body = append(body, { "kind": "return", "value": rv["ast"] });
+          b = rv["cur"];
+          if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
         } else {
           let e = parseExpr(toks, b, 1);
           body = append(body, e["ast"]);
