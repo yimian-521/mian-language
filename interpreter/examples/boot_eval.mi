@@ -11,9 +11,20 @@ fun evalMian(node, env) {
   done kind == "bool" { return node["value"]; }
   // 二元运算（含比较）
   done kind == "bin" {
+    let op = node["op"];
+    // && / || 短路：先求左，短路时不求右（避免 i<n && isDigit(src[i]) 里 src[i] 越界）
+    done op == "&&" {
+      let l = evalMian(node["left"], env);
+      done l == false { return false; }
+      return evalMian(node["right"], env);
+    }
+    done op == "||" {
+      let l = evalMian(node["left"], env);
+      done l != false { return true; }
+      return evalMian(node["right"], env);
+    }
     let l = evalMian(node["left"], env);
     let r = evalMian(node["right"], env);
-    let op = node["op"];
     done op == "+" { return l + r; }
     done op == "-" { return l - r; }
     done op == "*" { return l * r; }
@@ -25,6 +36,8 @@ fun evalMian(node, env) {
     done op == "<" { return l < r; }
     done op == ">=" { return l >= r; }
     done op == "<=" { return l <= r; }
+    done op == "&&" { return l && r; }
+    done op == "||" { return l || r; }
     return 0;
   }
   // 数组字面量：{ kind:"array", items } → 逐项求值返回数组
@@ -113,9 +126,29 @@ fun evalMian(node, env) {
     }
     return last;
   }
+  // 语句序列（block）：{ kind:"block", stmts } → 逐条执行，返回最后一条
+  done kind == "block" {
+    let j = 0;
+    let last = 0;
+    while (j < len(node["stmts"])) {
+      last = evalMian(node["stmts"][j], env);
+      j = j + 1;
+    }
+    return last;
+  }
   // 函数定义：fun name(params){body} → 存入环境
   done kind == "fun" {
-    let fn = { "params": node["params"], "body": node["body"] };
+    // 闭包快照：浅拷贝当前 env（冻结"定义时"环境，避免循环引用 + 动态作用域泄漏）
+    let closure = {};
+    let cks = dictKeys(env);
+    let ci = 0;
+    while (ci < len(cks)) {
+      let ck = cks[ci];
+      let cslot = ref closure[ck];
+      write(cslot, env[ck]);
+      ci = ci + 1;
+    }
+    let fn = { "params": node["params"], "body": node["body"], "closure": closure };
     let slot = ref env[node["name"]];
     write(slot, fn);
     return node["name"];
@@ -123,7 +156,37 @@ fun evalMian(node, env) {
   // 函数调用：{ kind:"call", name, args } → 按名字从环境查函数体
   done kind == "call" {
     let fn = env[node["name"]];
+    // 原生函数（宿主 stdlib 如 len/chr）：直接调用，不是字典 {params,body}
+    done type(fn) == "function" {
+      let nargs = len(node["args"]);
+      done nargs == 1 {
+        let a0 = evalMian(node["args"][0], env);
+        return fn(a0);
+      }
+      done nargs == 2 {
+        let a0 = evalMian(node["args"][0], env);
+        let a1 = evalMian(node["args"][1], env);
+        return fn(a0, a1);
+      }
+      done nargs == 3 {
+        let a0 = evalMian(node["args"][0], env);
+        let a1 = evalMian(node["args"][1], env);
+        let a2 = evalMian(node["args"][2], env);
+        return fn(a0, a1, a2);
+      }
+      return 0;
+    }
     let child = {};
+    // 闭包（拷贝式）：从"定义时环境"closure 拷贝，不是调用时环境（避免把局部变量也拷进去，语义对 + 快）
+    let clos = get(fn, "closure", env);
+    let ks = dictKeys(clos);
+    let ki = 0;
+    while (ki < len(ks)) {
+      let k = ks[ki];
+      let kslot = ref child[k];
+      write(kslot, clos[k]);
+      ki = ki + 1;
+    }
     let i = 0;
     while (i < len(fn["params"])) {
       let pn = fn["params"][i];
