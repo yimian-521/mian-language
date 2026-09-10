@@ -3,20 +3,22 @@
 // 这样免语言闭包快照下函数不会互相看不见（A 只调 A，自递归）。
 // 优先级：* / = 2，+ - = 1，括号递归下降。
 
-// 运算符优先级：乘除=3，加减=2，比较=1，其他=0
-// token 名对照 self_lexer：== EQ_EQ, != BANG_EQ, < LT, <= LT_EQ, > GT, >= GT_EQ
+// 运算符优先级：乘除=4，加减=3，比较=2，逻辑与=1，逻辑或=0，非运算符=-1
+// token 名对照 self_lexer：== EQ_EQ, != BANG_EQ, < LT, <= LT_EQ, > GT, >= GT_EQ, && AMPS, || PIPES
 fun precOf(tok) {
-  done tok["type"] == "STAR" { return 3; }
-  done tok["type"] == "SLASH" { return 3; }
-  done tok["type"] == "PLUS" { return 2; }
-  done tok["type"] == "MINUS" { return 2; }
-  done tok["type"] == "EQ_EQ" { return 1; }
-  done tok["type"] == "BANG_EQ" { return 1; }
-  done tok["type"] == "LT" { return 1; }
-  done tok["type"] == "LT_EQ" { return 1; }
-  done tok["type"] == "GT" { return 1; }
-  done tok["type"] == "GT_EQ" { return 1; }
-  return 0;
+  done tok["type"] == "STAR" { return 4; }
+  done tok["type"] == "SLASH" { return 4; }
+  done tok["type"] == "PLUS" { return 3; }
+  done tok["type"] == "MINUS" { return 3; }
+  done tok["type"] == "EQ_EQ" { return 2; }
+  done tok["type"] == "BANG_EQ" { return 2; }
+  done tok["type"] == "LT" { return 2; }
+  done tok["type"] == "LT_EQ" { return 2; }
+  done tok["type"] == "GT" { return 2; }
+  done tok["type"] == "GT_EQ" { return 2; }
+  done tok["type"] == "AMPS" { return 1; }
+  done tok["type"] == "PIPES" { return 0; }
+  return -1;
 }
 
 // 优先级爬升：唯一递归函数，原子解析内联（if/else if 链）
@@ -35,10 +37,10 @@ fun parseExpr(toks, i, minPrec) {
       atom = { "kind": "str", "value": sub(lit, 1, len(lit) - 1) };
       acur = i + 1;
     } else if (t["type"] == "TRUE") {
-      atom = { "kind": "bool", "value": 1 };   // 免语言真值：1 表示真
+      atom = { "kind": "bool", "value": true };   // 真布尔，不是数字 1
       acur = i + 1;
     } else if (t["type"] == "FALSE") {
-      atom = { "kind": "bool", "value": 0 };   // 0 表示假
+      atom = { "kind": "bool", "value": false };   // 假布尔，不是数字 0
       acur = i + 1;
     } else if (t["type"] == "IDENT" && i + 1 < len(toks) && toks[i+1]["type"] == "LPAREN") {
       // 函数调用：name( arg, arg, ... )
@@ -47,11 +49,11 @@ fun parseExpr(toks, i, minPrec) {
       let cur = i + 2;   // 跳过 ( 
       if (cur < len(toks) && toks[cur]["type"] != "RPAREN") {
         // 至少一个参数
-        let first = parseExpr(toks, cur, 1);
+        let first = parseExpr(toks, cur, 0);
         args = append(args, first["ast"]);
         cur = first["cur"];
         while (cur < len(toks) && toks[cur]["type"] == "COMMA") {
-          let nxt = parseExpr(toks, cur + 1, 1);
+          let nxt = parseExpr(toks, cur + 1, 0);
           args = append(args, nxt["ast"]);
           cur = nxt["cur"];
         }
@@ -63,11 +65,11 @@ fun parseExpr(toks, i, minPrec) {
       let items = [];
       let cur = i + 1;   // 跳过 [
       if (cur < len(toks) && toks[cur]["type"] != "RBRACKET") {
-        let first = parseExpr(toks, cur, 1);
+        let first = parseExpr(toks, cur, 0);
         items = append(items, first["ast"]);
         cur = first["cur"];
         while (cur < len(toks) && toks[cur]["type"] == "COMMA") {
-          let nxt = parseExpr(toks, cur + 1, 1);
+          let nxt = parseExpr(toks, cur + 1, 0);
           items = append(items, nxt["ast"]);
           cur = nxt["cur"];
         }
@@ -89,7 +91,7 @@ fun parseExpr(toks, i, minPrec) {
         }
         cur = cur + 1;   // 跳到 :
         if (cur < len(toks) && toks[cur]["type"] == "COLON") { cur = cur + 1; }
-        let v = parseExpr(toks, cur, 1);
+        let v = parseExpr(toks, cur, 0);
         entries = append(entries, { "key": key, "value": v["ast"] });
         cur = v["cur"];
         if (cur < len(toks) && toks[cur]["type"] == "COMMA") { cur = cur + 1; }
@@ -100,7 +102,7 @@ fun parseExpr(toks, i, minPrec) {
       atom = { "kind": "var", "name": t["lexeme"] };
       acur = i + 1;
     } else if (t["type"] == "LPAREN") {
-      let inner = parseExpr(toks, i + 1, 1);
+      let inner = parseExpr(toks, i + 1, 0);
       atom = inner["ast"];
       acur = inner["cur"] + 1;
     }
@@ -110,13 +112,13 @@ fun parseExpr(toks, i, minPrec) {
   let cur = acur;
   // 后缀索引：atom[索引] → { kind:"index", callee, index }
   while (cur < len(toks) && toks[cur]["type"] == "LBRACKET") {
-    let idx = parseExpr(toks, cur + 1, 1);
+    let idx = parseExpr(toks, cur + 1, 0);
     ast = { "kind": "index", "callee": ast, "index": idx["ast"] };
     cur = idx["cur"] + 1;   // 跳过 ]
   }
   // 赋值：var = value（右结合）——只有 atom 是变量才能赋值
   if (atom["kind"] == "var" && cur < len(toks) && toks[cur]["type"] == "EQ") {
-    let v = parseExpr(toks, cur + 1, 1);
+    let v = parseExpr(toks, cur + 1, 0);
     return { "ast": { "kind": "assign", "name": atom["name"], "value": v["ast"] }, "cur": v["cur"] };
   }
   let goon = 1;
@@ -131,6 +133,88 @@ fun parseExpr(toks, i, minPrec) {
     }
   }
   return { "ast": ast, "cur": cur };
+}
+
+// 语句序列解析：处理一个"块"里的语句（到 RBRACE 为止）
+// 处理：; / return / let / print / while / if(含 else if 链) / 赋值 / 表达式
+fun parseBlock(toks, i) {
+  let stmts = [];
+  let b = i;
+  while (b < len(toks) && toks[b]["type"] != "RBRACE") {
+    if (toks[b]["type"] == "SEMI") { b = b + 1; }
+    else if (toks[b]["type"] == "RETURN") {
+      let rv = parseExpr(toks, b + 1, 0);
+      stmts = append(stmts, { "kind": "return", "value": rv["ast"] });
+      b = rv["cur"];
+      if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
+    }
+    else if (toks[b]["type"] == "LET") {
+      let nm = toks[b + 1]["lexeme"];
+      let lv = parseExpr(toks, b + 3, 0);
+      stmts = append(stmts, { "kind": "let", "name": nm, "value": lv["ast"] });
+      b = lv["cur"];
+      if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
+    }
+    else if (toks[b]["type"] == "PRINT") {
+      let pv = parseExpr(toks, b + 1, 0);
+      stmts = append(stmts, { "kind": "print", "value": pv["ast"] });
+      b = pv["cur"];
+      if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
+    }
+    else if (toks[b]["type"] == "WHILE") {
+      let condStart = b + 2;
+      let cond = parseExpr(toks, condStart, 0);
+      let wb = cond["cur"];
+      if (wb < len(toks) && toks[wb]["type"] == "RPAREN") { wb = wb + 1; }
+      if (wb < len(toks) && toks[wb]["type"] == "LBRACE") { wb = wb + 1; }
+      let wres = parseBlock(toks, wb);
+      stmts = append(stmts, { "kind": "while", "condition": cond["ast"], "body": wres["stmts"] });
+      b = wres["cur"] + 1;
+    }
+    else if (toks[b]["type"] == "IF") {
+      // if 链（含 else if）
+      let ifchain = 0;
+      let iftail = 0;
+      let wif = b;
+      while (wif < len(toks) && toks[wif]["type"] == "IF") {
+        let wcond = parseExpr(toks, wif + 1, 0);
+        let wib = wcond["cur"];
+        if (wib < len(toks) && toks[wib]["type"] == "RPAREN") { wib = wib + 1; }
+        if (wib < len(toks) && toks[wib]["type"] == "LBRACE") { wib = wib + 1; }
+        let wthen = parseBlock(toks, wib);
+        wib = wthen["cur"];
+        if (wib < len(toks) && toks[wib]["type"] == "RBRACE") { wib = wib + 1; }
+        let newif = { "kind": "if", "condition": wcond["ast"], "then": { "kind": "block", "stmts": wthen["stmts"] }, "else": { "kind": "num", "value": 0 } };
+        if (ifchain == 0) { ifchain = newif; } else { iftail["else"] = newif; }
+        iftail = newif;
+        if (wib < len(toks) && toks[wib]["type"] == "ELSE") {
+          wib = wib + 1;
+          if (wib < len(toks) && toks[wib]["type"] == "IF") {
+            wif = wib;
+          } else if (wib < len(toks) && toks[wib]["type"] == "LBRACE") {
+            wib = wib + 1;
+            let weres = parseBlock(toks, wib);
+            iftail["else"] = { "kind": "block", "stmts": weres["stmts"] };
+            wib = weres["cur"];
+            if (wib < len(toks) && toks[wib]["type"] == "RBRACE") { wib = wib + 1; }
+            break;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+      stmts = append(stmts, ifchain);
+      b = wib;
+    }
+    else {
+      let e = parseExpr(toks, b, 0);
+      stmts = append(stmts, e["ast"]);
+      b = e["cur"];
+    }
+  }
+  return { "stmts": stmts, "cur": b };
 }
 
 // 解析程序：fun 定义 或 表达式，返回语句数组
@@ -153,58 +237,42 @@ fun parseProgram(toks, i) {
         }
       }
       // p 现在指向 )，跳过它到 {
-      let body = [];
       let b = p + 2;   // 跳过 ) {
-      while (toks[b]["type"] != "RBRACE") {
-        // body 里的表达式（简化：每个用 ; 或 } 分隔，这里直接 parseExpr 到下一个边界）
-        if (toks[b]["type"] == "SEMI") {
-          b = b + 1;
-        } else if (toks[b]["type"] == "RETURN") {
-          // return 语句：return value; → { kind:"return", value }
-          let rv = parseExpr(toks, b + 1, 1);
-          body = append(body, { "kind": "return", "value": rv["ast"] });
-          b = rv["cur"];
-          if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
-        } else {
-          let e = parseExpr(toks, b, 1);
-          body = append(body, e["ast"]);
-          b = e["cur"];
-        }
-      }
-      stmts = append(stmts, { "kind": "fun", "name": name, "params": params, "body": body });
-      cur = b + 1;   // 跳过 }
+      let bres = parseBlock(toks, b);
+      stmts = append(stmts, { "kind": "fun", "name": name, "params": params, "body": bres["stmts"] });
+      cur = bres["cur"] + 1;   // 跳过 }
     } else if (toks[cur]["type"] == "LET") {
       // let 声明：let name = value;
       let name = toks[cur + 1]["lexeme"];
       let eq = cur + 2;   // 跳过 name =  → 实际指向 =
       // eq 应在 = 处，值从 eq+1 开始
-      let v = parseExpr(toks, eq + 1, 1);
+      let v = parseExpr(toks, eq + 1, 0);
       stmts = append(stmts, { "kind": "let", "name": name, "value": v["ast"] });
       cur = v["cur"];
       // 跳过 ;
       if (cur < len(toks) && toks[cur]["type"] == "SEMI") { cur = cur + 1; }
     } else if (toks[cur]["type"] == "PRINT") {
       // print 语句：print value;
-      let v = parseExpr(toks, cur + 1, 1);
+      let v = parseExpr(toks, cur + 1, 0);
       stmts = append(stmts, { "kind": "print", "value": v["ast"] });
       cur = v["cur"];
       if (cur < len(toks) && toks[cur]["type"] == "SEMI") { cur = cur + 1; }
     } else if (toks[cur]["type"] == "IF") {
       // if 语句：if condition { thenBranch } else { elseBranch }
-      let cond = parseExpr(toks, cur + 1, 1);   // 跳过 if
+      let cond = parseExpr(toks, cur + 1, 0);   // 跳过 if
       let b = cond["cur"];
       // 跳过 { 前的 )
       if (b < len(toks) && toks[b]["type"] == "RPAREN") { b = b + 1; }
       if (b < len(toks) && toks[b]["type"] == "LBRACE") { b = b + 1; }
       // 解析 then 分支（单表达式）
-      let thenBody = parseExpr(toks, b, 1);
+      let thenBody = parseExpr(toks, b, 0);
       b = thenBody["cur"];
       if (b < len(toks) && toks[b]["type"] == "RBRACE") { b = b + 1; }
       // 解析 else 分支（如果有）
       let elseBody = { "kind": "num", "value": 0 };
       if (b < len(toks) && toks[b]["type"] == "ELSE") {
         if (b + 1 < len(toks) && toks[b+1]["type"] == "LBRACE") { b = b + 2; }
-        let eb = parseExpr(toks, b, 1);
+        let eb = parseExpr(toks, b, 0);
         elseBody = eb["ast"];
         b = eb["cur"];
         if (b < len(toks) && toks[b]["type"] == "RBRACE") { b = b + 1; }
@@ -215,7 +283,7 @@ fun parseProgram(toks, i) {
       // while 循环：while ( condition ) { body }
       // self_lexer: while ( cond ) { stmts } → tokens: WHILE LPAREN ... RPAREN LBRACE ... RBRACE
       let condStart = cur + 2;   // 跳过 while (
-      let cond = parseExpr(toks, condStart, 1);   // 条件：minPrec=1，遇 ) 停（prec0）
+      let cond = parseExpr(toks, condStart, 0);   // 条件：minPrec=1，遇 ) 停（prec0）
       // 现在 cur 指向 ) 之后，应到 { 
       let b = cond["cur"];
       if (b < len(toks) && toks[b]["type"] == "RPAREN") { b = b + 1; }
@@ -225,19 +293,19 @@ fun parseProgram(toks, i) {
         if (toks[b]["type"] == "SEMI") { b = b + 1; }
         else if (toks[b]["type"] == "PRINT") {
           // body 里 print：print value;
-          let pv = parseExpr(toks, b + 1, 1);
+          let pv = parseExpr(toks, b + 1, 0);
           body = append(body, { "kind": "print", "value": pv["ast"] });
           b = pv["cur"];
           if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
         } else if (toks[b]["type"] == "LET") {
           // body 里 let：let name = value;
           let nm = toks[b + 1]["lexeme"];
-          let lv = parseExpr(toks, b + 3, 1);
+          let lv = parseExpr(toks, b + 3, 0);
           body = append(body, { "kind": "let", "name": nm, "value": lv["ast"] });
           b = lv["cur"];
           if (b < len(toks) && toks[b]["type"] == "SEMI") { b = b + 1; }
         } else {
-          let e = parseExpr(toks, b, 1);
+          let e = parseExpr(toks, b, 0);
           body = append(body, e["ast"]);
           b = e["cur"];
         }
@@ -247,7 +315,7 @@ fun parseProgram(toks, i) {
     } else if (toks[cur]["type"] == "SEMI") {
       cur = cur + 1;
     } else {
-      let e = parseExpr(toks, cur, 1);
+      let e = parseExpr(toks, cur, 0);
       stmts = append(stmts, e["ast"]);
       cur = e["cur"];
     }
