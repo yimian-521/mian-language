@@ -7,13 +7,32 @@ const { Lexer } = require("./lexer");
 const { Parser } = require("./parser");
 const { Evaluator, Ledger } = require("./evaluator");
 const { StrengthResolver } = require("./strength_resolver");
+const { makeStdlib } = require("./stdlib/machine_hands");
 
 const arg1 = process.argv[2];
 const withLedger = process.argv.includes("--ledger");
 const verbose = process.argv.includes("--verbose");
 const stress = process.argv.includes("--stress");
-const trace = process.argv.includes("--trace");   // 调试模式：摊开"每一步它把输入当成了什么"
 const thrArg = process.argv.find(a => a.startsWith("--threshold=")) || "";
+
+// ── 调试模式：可配置维度（免免四层定稿 2026-09-11，任意组合开关）──
+// 规则层(how)=遵守什么规则 / 实际层(actual)=值对但错位(篡改) / 执行层(what)=执行理解错 / 看见层(see)=值失真
+// 用法：--trace（无维度 = 全开，旧行为） / --trace=how / --trace=how,actual,what / 任意子集
+const DEBUG_DIMS = {
+  how:    { label: "规则层", desc: "它遵守什么规则（1+1=2 该标强值，标错即规则层错）", enabled: false },
+  actual: { label: "实际层", desc: "它客观看见的实际（值对但位置/内容被篡改）", enabled: false },
+  what:   { label: "执行层", desc: "它执行/理解有没有错（非代码自身原因）", enabled: false },
+  see:    { label: "看见层", desc: "值失真（它看见的值本身被扭曲，如 false 存成 0）", enabled: false },
+};
+function parseTraceDims() {
+  const arg = process.argv.find(a => a.startsWith("--trace")) || "";
+  if (!arg) return null;
+  if (!arg.includes("=")) return ["how", "actual", "what", "see"];   // --trace 无维度 = 全开（向后兼容）
+  return arg.split("=")[1].split(",").map(s => s.trim()).filter(Boolean);
+}
+const traceDims = parseTraceDims();
+if (traceDims) for (const d of traceDims) if (DEBUG_DIMS[d]) DEBUG_DIMS[d].enabled = true;
+const traceObj = traceDims ? { how: DEBUG_DIMS.how.enabled, actual: DEBUG_DIMS.actual.enabled, what: DEBUG_DIMS.what.enabled, see: DEBUG_DIMS.see.enabled } : null;
 
 // ── --version / --help ──
 const PKG = require("./package.json");
@@ -89,14 +108,17 @@ if (lexErrors.length || parseErrors.length) {
   process.exit(1);
 }
 
-// ── 调试模式 --trace：摊开"它把输入当成了什么" ──
-if (trace) {
-  console.log("=== ① lexer 把源码当成了什么（token 流）===");
-  for (const t of tokens) console.log(`  ${t.type} '${t.lexeme}' @${t.line}:${t.col}`);
-  console.log("\n=== ② parser 把 token 当成了什么（AST）===");
-  const { printAst } = require("./parser");
-  for (const s of statements) console.log("  " + printAst(s).trim());
-  console.log("");
+// ── 调试模式：按维度输出（可配置，不刷屏）──
+if (traceDims) {
+  console.log("=== 调试维度：" + traceDims.join(" + ") + " ===");
+  if (DEBUG_DIMS.what.enabled) {
+    console.log("=== ① lexer 把源码当成了什么（token 流）===");
+    for (const t of tokens) console.log(`  ${t.type} '${t.lexeme}' @${t.line}:${t.col}`);
+    console.log("\n=== ② parser 把 token 当成了什么（AST）===");
+    const { printAst } = require("./parser");
+    for (const s of statements) console.log("  " + printAst(s).trim());
+    console.log("");
+  }
 }
 
 // ── CLI 默认 import 安全 loader（与 C++ 原生执行器对齐：同目录 .mi + 循环防护）──
@@ -120,7 +142,7 @@ function cliParseSource(source) {
   return statements;
 }
 
-const ev = new Evaluator({ ledger: withLedger, importLoader: cliImportLoader, parseSource: cliParseSource, trace: trace || null });
+const ev = new Evaluator({ ledger: withLedger, importLoader: cliImportLoader, parseSource: cliParseSource, machineHands: makeStdlib(), trace: traceObj });
 (async () => {
   try {
     await ev.interpret(statements);   // interpret 现在是 async
