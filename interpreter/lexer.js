@@ -57,6 +57,12 @@ class Lexer {
   }
 
   scanTokens() {
+    // shebang 源码头：只在文件最开头（第一个字符是 #!）才跳过整行。
+    // 这是免语言作为"无源码头声明"脚本语言自己的形态——第一行 #! 是给操作系统看的，
+    // 不是代码；打开文件就是代码，不需要任何头部声明。
+    if (this.current === 0 && this.source.startsWith("#!")) {
+      while (this.peek() !== "\n" && !this.isAtEnd()) this.advance();
+    }
     while (!this.isAtEnd()) {
       this.start = this.current;
       this.scanToken();
