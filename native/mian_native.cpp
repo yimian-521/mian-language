@@ -16,7 +16,7 @@
 // ============ Token ============
 enum class TT {
     NUM, STR, IDENT,
-    KW_LET, KW_PRINT, KW_DONE, KW_WHILE, KW_FOR, KW_IF, KW_ELSE, KW_TRUE, KW_FALSE, KW_FUN, KW_RETURN, KW_IMPORT,
+    KW_LET, KW_PRINT, KW_DONE, KW_WHILE, KW_FOR, KW_IF, KW_ELSE, KW_TRUE, KW_FALSE, KW_FUN, KW_RETURN, KW_IMPORT, KW_REF,
     PLUS, MINUS, STAR, SLASH, EQ, EQEQ, EQEQEQ, NEQ, NEQEQ, LT, LTE, GT, GTE,
     ANDAND, OROR, BANG,
     LPAREN, RPAREN, LBRACE, RBRACE, LBRACKET, RBRACKET, SEMI, COMMA, COLON, DOT,
@@ -35,6 +35,7 @@ enum class NK {
     NUM, STR, VAR, LET, PRINT, DONE, WHILE, FOR, IF, BLOCK_ELSE, IMPORT,
     UNARY, BIN, LOGIC, EXPR_STMT,
     FUN, CALL, RETURN,
+    REF,
     ARR, DICT, INDEX, GETATTR
 };
 
@@ -62,18 +63,23 @@ struct ReturnSignal {
 };
 
 // ============ 值 ============
+struct ScopeChain;   // 前置声明（Val 的 REF 需要 SC*）
 struct Val {
-    enum class T { NUM, STR, FN, ARR, DICT } t{T::NUM};
+    enum class T { NUM, STR, FN, ARR, DICT, REF } t{T::NUM};
     double num{0};
     std::string str;
     const Node* fn{nullptr};
     std::vector<Val> arr;   // ARR：数组元素
     std::map<std::string, Val> dict;   // DICT：键值对
+    // REF：指向作用域条目的引用（变量名 + 所在 scope）
+    ScopeChain* refScope{nullptr};
+    std::string refName;
     static Val n(double v) { Val x; x.t = T::NUM; x.num = v; return x; }
     static Val s(const std::string& v) { Val x; x.t = T::STR; x.str = v; return x; }
     static Val f(const Node* nd) { Val x; x.t = T::FN; x.fn = nd; return x; }
     static Val a(std::vector<Val> v) { Val x; x.t = T::ARR; x.arr = std::move(v); return x; }
     static Val d(std::map<std::string, Val> v) { Val x; x.t = T::DICT; x.dict = std::move(v); return x; }
+    static Val r(ScopeChain* scope, const std::string& name) { Val x; x.t = T::REF; x.refScope = scope; x.refName = name; return x; }
     bool truthy() const { return t == T::STR ? !str.empty() : (num != 0); }
 };
 
@@ -169,6 +175,7 @@ private:
                     if (s == "fun")    return make(TT::KW_FUN, s, ln);
                     if (s == "return") return make(TT::KW_RETURN, s, ln);
                     if (s == "import") return make(TT::KW_IMPORT, s, ln);
+                    if (s == "ref")    return make(TT::KW_REF, s, ln);
                     if (s == "true")  { auto t = make(TT::KW_TRUE, s, ln); t.num = 1; return t; }
                     if (s == "false") { auto t = make(TT::KW_FALSE, s, ln); t.num = 0; return t; }
                     return make(TT::IDENT, s, ln);
@@ -383,6 +390,12 @@ private:
         return l;
     }
     Node* unary() {
+        if (match(TT::KW_REF)) {
+            // ref x：创建指向变量槽位的引用
+            Token name = consume(TT::IDENT, "ref 后面要跟变量名");
+            auto* n = new Node; n->k = NK::REF; n->s = name.text;
+            return n;
+        }
         if (match(TT::MINUS) || match(TT::BANG)) {
             std::string op = prev().text;
             Node* r = unary();
@@ -659,6 +672,12 @@ Val eval(const Node* nd, SC* sc) {
             if (!p) throw MIError("变量 '" + nd->s + "' 未声明");
             return *p;
         }
+        case NK::REF: {
+            // ref x：创建指向变量槽位的引用（存 scope + 变量名）
+            Val* p = lookup(sc, nd->s);
+            if (!p) throw MIError("变量 '" + nd->s + "' 未声明");
+            return Val::r(sc, nd->s);
+        }
         case NK::UNARY: {
             Val v = eval(nd->r, sc);
             if (v.t != Val::T::NUM) throw MIError("一元运算只吃数字");
@@ -763,6 +782,24 @@ Val eval(const Node* nd, SC* sc) {
                     if (nd->ks.size() != 0) throw MIError("clock 不需要参数");
                     return Val::n((double)(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
                 }
+                if (f.str == "read") {
+                    if (nd->ks.size() != 1) throw MIError("read 需要 1 个参数");
+                    Val r = eval(nd->ks[0], sc);
+                    if (r.t != Val::T::REF) throw MIError("read 的参数必须是 ref 创建的引用");
+                    Val* p = lookup(r.refScope, r.refName);
+                    if (!p) throw MIError("引用指向的变量 '" + r.refName + "' 已被销毁（悬垂引用）");
+                    return *p;
+                }
+                if (f.str == "write") {
+                    if (nd->ks.size() != 2) throw MIError("write 需要 2 个参数");
+                    Val r = eval(nd->ks[0], sc);
+                    Val v = eval(nd->ks[1], sc);
+                    if (r.t != Val::T::REF) throw MIError("write 的第一个参数必须是 ref 创建的引用");
+                    Val* p = lookup(r.refScope, r.refName);
+                    if (!p) throw MIError("引用指向的变量 '" + r.refName + "' 已被销毁（悬垂引用）");
+                    *p = v;   // 通过引用改真实变量
+                    return v;
+                }
                 throw MIError("未知原生函数: " + f.str);
             }
             if (f.t != Val::T::FN) throw MIError("不是函数，不能调用");
@@ -808,6 +845,8 @@ int main(int argc, char** argv) {
         global.m["type"]  = Val::f(nullptr); global.m["type"].str = "type";
         global.m["str"]   = Val::f(nullptr); global.m["str"].str = "str";
         global.m["clock"] = Val::f(nullptr); global.m["clock"].str = "clock";
+        global.m["read"]  = Val::f(nullptr); global.m["read"].str = "read";
+        global.m["write"] = Val::f(nullptr); global.m["write"].str = "write";
         for (Node* nd : stmts) {
             try { execStmt(nd, &global); }
             catch (const Val&) { /* 顶层 return 不算错 */ }
