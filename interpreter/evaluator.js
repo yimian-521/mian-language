@@ -201,6 +201,17 @@ class Evaluator {
         if (!d || typeof d !== "object" || Array.isArray(d)) throw new MianError(errFmt(ME.E905.msg, {}), 0, 0, ME.E905.kind, ME.E905.level || "error", "E905");
         return (key in d) ? d[key] : (def === undefined ? null : def);
       }, STRENGTH.STRONG, "stdlib get"));
+      // dictKeys(d)：返回字典的键数组（遍历字典，自举闭包需要遍历/合并外层环境）
+      this.env.set("dictKeys", new MianValue((d) => {
+        if (!d || typeof d !== "object" || Array.isArray(d)) throw new MianError("dictKeys 需要字典", 0, 0, "code", "error", "E923");
+        return Object.keys(d);
+      }, STRENGTH.STRONG, "stdlib dictKeys"));
+      // push(arr, item)：原地追加到数组末尾（O(1)），返回 arr。容器原语，替代 arr+[item] 的 O(n) 复制
+      this.env.set("push", new MianValue((arr, item) => {
+        if (!Array.isArray(arr)) throw new MianError("push 第一个参数要是数组", 0, 0, "code", "error", "E924");
+        arr.push(item);
+        return arr;
+      }, STRENGTH.STRONG, "stdlib push"));
       // read(r)：读引用指向的目标值。悬垂（目标被销毁）→ 明确报错，不静默。
       this.env.set("read", new MianValue((r) => {
         const ref = (r instanceof MianValue) ? r.value : r;
@@ -298,9 +309,17 @@ class Evaluator {
     return null;
   }
 
-  // 调试辅助：记录"这一步把输入当成了什么"（边跑边懂）
-  _trace(msg) {
+   // 调试辅助：记录"这一步把输入当成了什么"（边跑边懂）
+   // dim = 维度（免免四层定稿 2026-09-11，勿再混淆）：
+   //   规则层(how) = 它【遵守什么规则】。1+1=2 该标强值，标错即规则层错。
+   //   执行层(what) = 它【执行/理解有没有错】。证明"非代码自身原因，是它的理解问题"。
+   //   实际层(actual) = 【客观事实】它看见/拿到什么（值对但位置错/被外部污染）。初衷：查"有没有其他文件污染它的判断"。
+   //   看见层(see) = 【它自己的判断】它自身最纯的判断/裁决（判断真假、判断强度、判断 a==b）。初衷：查"它自身判断失误"。
+   //   关键区别: 实际层 = 客观事实(外部污染)；看见层 = 主观判断(自身失误)。两者不是"像"就该合并——一个记事实，一个记判断。
+  _trace(msg, dim = "see") {
     if (!this.trace) return;
+    // this.trace 可能是 true（全开，兼容旧）或 { see, how, what }（分维度）
+    if (this.trace !== true && !this.trace[dim]) return;
     console.log(`  ${"  ".repeat(this.traceDepth)}▶ ${msg}`);
   }
 
@@ -366,7 +385,8 @@ class Evaluator {
     const rebound = new MianValue(mv.value, STRENGTH.MEDIUM, `let ${node.name.lexeme}`);
     this.env.set(node.name.lexeme, rebound);
     this.ledger.birth(rebound, `let ${node.name.lexeme}`);
-    this._trace(`let ${node.name.lexeme} = ${summarize(mv)} → 存入环境 (${rebound.strength})`);
+    this._trace(`let ${node.name.lexeme} = ${summarize(mv)} → 存入环境 (${rebound.strength})`, "what");
+    this._trace(`实际层：槽位 ${node.name.lexeme} ← ${summarize(mv.value)}`, "actual");
     return rebound;
   }
 
@@ -393,6 +413,7 @@ class Evaluator {
 
   async execDone(node) {
     const c = await this.evaluate(node.condition);
+    this._trace(`判断 ${summarize(c)} 强度为 ${c.strength}（${c.strength === STRENGTH.WEAK ? "弱值→拒" : "强值→受"}）`, "see");
     // done 只吃强值裁决；弱值升格不合法
     if (c.strength === STRENGTH.WEAK) {
       throw new MianError(errFmt(ME.E401.msg, {}), node.line, node.col, ME.E401.kind, ME.E401.level || "error", "E401");
@@ -416,7 +437,8 @@ class Evaluator {
     const c = await this.evaluate(node.condition);
     const chosen = isTruthy(c.value) ? "then" : "else";
     this.ledger.record("if_branch", { chosen, cond: summarize(c), strength: c.strength });
-    this._trace(`if 条件 ${summarize(c)} → 走 ${chosen} 分支`);
+    this._trace(`判断 ${summarize(c)} 为 ${chosen === "then" ? "真" : "假"}`, "see");
+    this._trace(`if 条件 ${summarize(c)} → 走 ${chosen} 分支`, "how");
     const branch = isTruthy(c.value) ? node.thenBranch : node.elseBranch;
     if (!branch) return null;
     let r = null;
@@ -500,16 +522,16 @@ class Evaluator {
     switch (node.kind) {
       case "literal":
         // 字面量 = 无时效事实（强度由"出生它的语法"决定——静态 pass 已写，运行时不重算）
-        { const mv = new MianValue(node.value, staticOf(node), "literal"); this._trace(`字面量 ${JSON.stringify(node.value)} → 值 ${summarize(mv)} (${mv.strength})`); return mv; }
+        { const mv = new MianValue(node.value, staticOf(node), "literal"); this._trace(`字面量 ${JSON.stringify(node.value)} → 值 ${summarize(mv)} (${mv.strength})`, "actual"); return mv; }
       case "variable": {
         const slot = this.env.get(node.name);
         if (slot === undefined && this.globalEnv && this.globalEnv !== this.env && this.globalEnv.has(node.name)) {
           // 懒查找：快照里缺失的顶层名字，回退到全局注册表（函数互引的关键）
-          this._trace(`变量 ${node.name} → 懒查到全局 ${summarize(this.globalEnv.get(node.name))}`);
+          this._trace(`变量 ${node.name} → 懒查到全局 ${summarize(this.globalEnv.get(node.name))}`, "actual");
           return this.globalEnv.get(node.name);
         }
         if (slot === undefined) throw new MianError(errFmt(ME.E081.msg, { name: node.name }), node.line, node.col, ME.E081.kind, ME.E081.level || "error", "E081");
-        this._trace(`变量 ${node.name} → ${summarize(slot)} (${slot.strength})`);
+        this._trace(`变量 ${node.name} → ${summarize(slot)} (${slot.strength})`, "actual");
         return slot;   // 变量携带它自己出生时的强度
       }
       case "grouping": return this.evaluate(node.expr);
@@ -597,7 +619,7 @@ class Evaluator {
       case "array": {
         const items = await Promise.all(node.items.map(i => this.evaluate(i)));
         const arr = items.map(m => m.value);
-        this._trace(`数组 [${arr.join(", ")}] → len ${arr.length}`);
+        this._trace(`数组 [${arr.join(", ")}] → len ${arr.length}`, "actual");
         return new MianValue(arr, staticOf(node), "array");
       }
       case "dict": {
@@ -606,7 +628,7 @@ class Evaluator {
           const v = await this.evaluate(e.value);
           obj[e.key] = v.value;
         }
-        this._trace(`字典 {${Object.keys(obj).map(k => k + ":" + summarize(obj[k])).join(", ")}} → ${Object.keys(obj).length} 键`);
+        this._trace(`字典 {${Object.keys(obj).map(k => k + ":" + summarize(obj[k])).join(", ")}} → ${Object.keys(obj).length} 键`, "actual");
         return new MianValue(obj, staticOf(node), "dict");
       }
       case "index": {
@@ -616,7 +638,7 @@ class Evaluator {
         if (target.value && typeof target.value === "object" && !Array.isArray(target.value)) {
           if (typeof idx.value !== "string") throw new MianError(errFmt(ME.E205.msg, {}), node.line, node.col, ME.E205.kind, ME.E205.level || "error", "E205");
           if (!(idx.value in target.value)) throw new MianError(errFmt(ME.E206.msg, { key: idx.value }), node.line, node.col, ME.E206.kind, ME.E206.level || "error", "E206");
-          this._trace(`索引 d["${idx.value}"] → ${summarize(target.value[idx.value])}`);
+          this._trace(`索引 d["${idx.value}"] → ${summarize(target.value[idx.value])}`, "actual");
           return new MianValue(target.value[idx.value], staticOf(node), `dict ${idx.value}`);
         }
         // 字符串索引：s[i] 返回单字符字符串（自举需要）
@@ -669,7 +691,7 @@ class Evaluator {
             throw new MianError(errFmt(ME.E901.msg, {}), node.line, node.col, ME.E901.kind, ME.E901.level || "error", "E901");
           }
           this.ledger.birth(mv, `assign index`);
-          this._trace(`索引赋值 ${summarize(target.value)}[${summarize(idx)}] = ${summarize(mv)} → 已写入`);
+          this._trace(`索引赋值 ${summarize(target.value)}[${summarize(idx)}] = ${summarize(mv)} → 已写入`, "what");
           return mv;
         }
         const name = node.name.kind === "variable" ? node.name.name : null;
@@ -677,7 +699,7 @@ class Evaluator {
         const rebound = new MianValue(mv.value, staticOf(node), `assign ${name}`);
         this.env.set(name, rebound);
         this.ledger.birth(rebound, `assign ${name}`);
-        this._trace(`赋值 ${name} = ${summarize(mv)} → 写入环境 (${rebound.strength})`);
+        this._trace(`赋值 ${name} = ${summarize(mv)} → 写入环境 (${rebound.strength})`, "what");
         return rebound;
       }
       default: throw new MianError(errFmt(ME.E909.msg, { kind: node.kind }), node.line, node.col, ME.E909.kind, ME.E909.level || "error", "E909");
@@ -713,7 +735,7 @@ class Evaluator {
       }
       const mv = new MianValue(ans, staticOf(node), "comparison");
       this.ledger.birth(mv, "comparison");
-      this._trace(`比较 ${summarize(left)} ${op} ${summarize(right)} → ${summarize(mv)} (${mv.strength})`);
+      this._trace(`比较 ${summarize(left)} ${op} ${summarize(right)} → ${summarize(mv)} (${mv.strength})`, "how");
       return mv;
     }
 
@@ -722,20 +744,20 @@ class Evaluator {
       if (typeof left.value === "number" && typeof right.value === "number") {
         const mv = new MianValue(left.value + right.value, STRENGTH.MEDIUM, "arithmetic");
         this.ledger.birth(mv, `arithmetic +`);
-        this._trace(`算术 ${left.value} + ${right.value} → ${mv.value} (${mv.strength})`);
+        this._trace(`算术 ${left.value} + ${right.value} → ${mv.value} (${mv.strength})`, "what");
         return mv;
       }
       if (typeof left.value === "string" && typeof right.value === "string") {
         const mv = new MianValue(left.value + right.value, STRENGTH.MEDIUM, "concat");
         this.ledger.birth(mv, "concat");
-        this._trace(`拼接 "${left.value}" + "${right.value}" → "${mv.value}" (${mv.strength})`);
+        this._trace(`拼接 "${left.value}" + "${right.value}" → "${mv.value}" (${mv.strength})`, "what");
         return mv;
       }
       // 数组拼接：arr + [item] 或 [a] + [b]（自举/工具函数需要）
       if (Array.isArray(left.value) && Array.isArray(right.value)) {
         const mv = new MianValue(left.value.concat(right.value), STRENGTH.MEDIUM, "arr concat");
         this.ledger.birth(mv, "arr concat");
-        this._trace(`数组拼接 len ${left.value.length} + len ${right.value.length} → len ${mv.value.length}`);
+        this._trace(`数组拼接 len ${left.value.length} + len ${right.value.length} → len ${mv.value.length}`, "what");
         return mv;
       }
       throw new MianError(errFmt(ME.E914.msg, { ltype: typeof left.value, rtype: typeof right.value }), node.line, node.col, ME.E914.kind, ME.E914.level || "error", "E914");
@@ -754,7 +776,7 @@ class Evaluator {
     }
     const mv = new MianValue(ans, STRENGTH.MEDIUM, "arithmetic");
     this.ledger.birth(mv, `arithmetic ${op}`);
-    this._trace(`算术 ${left.value} ${op} ${right.value} → ${mv.value} (${mv.strength})`);
+    this._trace(`算术 ${left.value} ${op} ${right.value} → ${mv.value} (${mv.strength})`, "what");
     return mv;
   }
 
@@ -769,7 +791,7 @@ class Evaluator {
       const mv = new MianValue(r, STRENGTH.STRONG, "native call"); // 原生返回=裁决
       this.ledger.birth(mv, `native call`);
       this.ledger.consume(mv, "native call");
-      this._trace(`原生调用 ${node.callee && node.callee.name || "?"} → ${summarize(mv)}`);
+      this._trace(`原生调用 ${node.callee && node.callee.name || "?"} → ${summarize(mv)}`, "what");
       return mv;
     }
 
@@ -799,7 +821,7 @@ class Evaluator {
     this.ledger.birth(null, `call ${fn.name}(${bindings.join(", ")})`);
 
     this.traceDepth++;
-    this._trace(`调用 ${fn.name}(${bindings.join(", ")})`);
+    this._trace(`调用 ${fn.name}(${bindings.join(", ")})`, "what");
 
     const child = new Evaluator({
       ledger: this.ledgerEnabled,
@@ -819,7 +841,7 @@ class Evaluator {
     this.traceDepth--;
     const retMv = new MianValue(r, STRENGTH.MEDIUM, `call ${fn.name}`);
     this.ledger.consume(retMv, `call ${fn.name}`);
-    this._trace(`← ${fn.name} 返回 ${summarize(retMv)}`);
+    this._trace(`← ${fn.name} 返回 ${summarize(retMv)}`, "what");
     return retMv;
   }
 }
