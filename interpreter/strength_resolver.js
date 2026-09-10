@@ -154,6 +154,15 @@ class StrengthResolver {
         node.staticBorn = isCmp ? "comparison" : "arithmetic";
         break;
       }
+      case "logical": {
+        this.expr(node.left);
+        this.expr(node.right);
+        // && / || 结果是"确定的布尔事实"（短路返回 false/true，否则 isTruthy 组合）
+        // 与 comparison 同类：定性裁决，不是猜测。补此 case 避免兜底成 WEAK（done E401 根因）
+        node.staticStrength = STRENGTH.STRONG;
+        node.staticBorn = "logical";
+        break;
+      }
       case "call": {
         this.expr(node.callee);
         for (const a of node.args) this.expr(a);
